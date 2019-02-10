@@ -25,9 +25,17 @@ use std::mem;
 #[cfg(all(unix, not(target_os = "android"), not(target_os = "macos")))]
 use ash::extensions::khr::XlibSurface;
 use ash::extensions::{
-    ext::DebugReport,
+    ext::{
+        memory_requirements2_name, physical_device_properties2_name, DebugReport,
+        DescriptorIndexing,
+    },
     khr::{Surface, Swapchain},
 };
+
+#[cfg(target_os = "windows")]
+use ash::extensions::nv::RayTracing;
+#[cfg(all(unix, not(target_os = "android"), not(target_os = "macos")))]
+use ash::extensions::nv::RayTracing;
 
 #[cfg(target_os = "windows")]
 use ash::extensions::khr::Win32Surface;
@@ -314,7 +322,7 @@ impl ExampleBase {
         });
     }
 
-    pub fn new(window_width: u32, window_height: u32) -> Self {
+    pub fn new(window_width: u32, window_height: u32, ray_tracing: bool /* temp */) -> Self {
         unsafe {
             let events_loop = winit::EventsLoop::new();
             let window = winit::WindowBuilder::new()
@@ -395,7 +403,18 @@ impl ExampleBase {
                 .nth(0)
                 .expect("Couldn't find suitable device.");
             let queue_family_index = queue_family_index as u32;
-            let device_extension_names_raw = [Swapchain::name().as_ptr()];
+
+            let device_extension_names_raw = if ray_tracing {
+                vec![
+                    Swapchain::name().as_ptr(),
+                    RayTracing::name().as_ptr(),
+                    DescriptorIndexing::name().as_ptr(),
+                    memory_requirements2_name().as_ptr(),
+                ] //, physical_device_properties2_name().as_ptr()]
+            } else {
+                vec![Swapchain::name().as_ptr()]
+            };
+
             let features = vk::PhysicalDeviceFeatures {
                 shader_clip_distance: 1,
                 ..Default::default()
@@ -407,14 +426,33 @@ impl ExampleBase {
                 .queue_priorities(&priorities)
                 .build()];
 
-            let device_create_info = vk::DeviceCreateInfo::builder()
-                .queue_create_infos(&queue_info)
-                .enabled_extension_names(&device_extension_names_raw)
-                .enabled_features(&features);
+            let device: Device = if ray_tracing {
+                let mut descriptor_indexing =
+                    vk::PhysicalDeviceDescriptorIndexingFeaturesEXT::default();
+                let mut features2 = vk::PhysicalDeviceFeatures2::builder()
+                    .next(&mut descriptor_indexing)
+                    .build();
+                features2.features = features;
 
-            let device: Device = instance
-                .create_device(pdevice, &device_create_info, None)
-                .unwrap();
+                let device_create_info = vk::DeviceCreateInfo::builder()
+                    .queue_create_infos(&queue_info)
+                    .enabled_extension_names(&device_extension_names_raw)
+                    .next(&mut features2);
+
+                instance
+                    .create_device(pdevice, &device_create_info, None)
+                    .unwrap()
+            } else {
+                let device_create_info = vk::DeviceCreateInfo::builder()
+                    .queue_create_infos(&queue_info)
+                    .enabled_extension_names(&device_extension_names_raw)
+                    .enabled_features(&features);
+
+                instance
+                    .create_device(pdevice, &device_create_info, None)
+                    .unwrap()
+            };
+
             let present_queue = device.get_device_queue(queue_family_index as u32, 0);
 
             let surface_formats = surface_loader

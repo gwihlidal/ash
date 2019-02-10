@@ -1,8 +1,9 @@
 extern crate ash;
 extern crate examples;
 
-use ash::extensions::nv::RayTracing;
+use ash::extensions::nv;
 use ash::util::*;
+use ash::version::InstanceV1_1;
 use ash::vk;
 use examples::*;
 use std::default::Default;
@@ -11,448 +12,277 @@ use std::fs::File;
 use std::mem;
 use std::mem::align_of;
 use std::path::Path;
+use std::rc::Rc;
 
-#[derive(Clone, Debug, Copy)]
-struct Vertex {
-    pos: [f32; 4],
-    color: [f32; 4],
-}
-
-struct AccelerationStructure {
+struct BufferResource {
+    buffer: vk::Buffer,
     memory: vk::DeviceMemory,
-    accel_struct_info: vk::AccelerationStructureInfoNV,
-    accel_struct: vk::AccelerationStructureNV,
-    handle: u64,
+    size: vk::DeviceSize,
+    base: Rc<ExampleBase>,
 }
 
-fn create_acceleration_structure(
-    base: &ExampleBase,
-    ray_tracing: &RayTracing,
-    device: &ash::Device,
-    accel_type: vk::AccelerationStructureTypeNV,
-    geometry: &[vk::GeometryNV],
-    instance_count: u32,
-) -> AccelerationStructure {
-    unsafe {
-        let accel_struct_info = vk::AccelerationStructureInfoNV::builder()
-            .ty(accel_type)
-            .flags(vk::BuildAccelerationStructureFlagsNV::PREFER_FAST_TRACE)
-            .geometries(geometry)
-            .instance_count(instance_count)
-            .build();
-        let create_info = vk::AccelerationStructureCreateInfoNV::builder()
-            .info(accel_struct_info)
-            .compacted_size(0)
-            .build();
-        let accel_struct = ray_tracing
-            .create_acceleration_structure(&create_info, None)
+impl BufferResource {
+    fn new(
+        size: vk::DeviceSize,
+        usage: vk::BufferUsageFlags,
+        memory_properties: vk::MemoryPropertyFlags,
+        base: Rc<ExampleBase>,
+    ) -> Self {
+        unsafe {
+            let buffer_info = vk::BufferCreateInfo::builder()
+                .size(size)
+                .usage(usage)
+                .sharing_mode(vk::SharingMode::EXCLUSIVE)
+                .build();
+
+            let buffer = base.device.create_buffer(&buffer_info, None).unwrap();
+
+            let memory_req = base.device.get_buffer_memory_requirements(buffer);
+
+            let memory_index = find_memorytype_index(
+                &memory_req,
+                &base.device_memory_properties,
+                memory_properties,
+            )
             .unwrap();
 
-        let requirements_info = vk::AccelerationStructureMemoryRequirementsInfoNV::builder()
-            .acceleration_structure(accel_struct)
-            .ty(vk::AccelerationStructureMemoryRequirementsTypeNV::OBJECT)
-            .build();
-        let requirements =
-            ray_tracing.get_acceleration_structure_memory_requirements(&requirements_info);
+            let allocate_info = vk::MemoryAllocateInfo {
+                allocation_size: memory_req.size,
+                memory_type_index: memory_index,
+                ..Default::default()
+            };
 
-        let memory_type_index = find_memorytype_index(
-            &requirements.memory_requirements,
-            &base.device_memory_properties,
-            vk::MemoryPropertyFlags::DEVICE_LOCAL,
-        )
-        .unwrap();
+            let memory = base.device.allocate_memory(&allocate_info, None).unwrap();
 
-        let allocate_info = vk::MemoryAllocateInfo {
-            allocation_size: requirements.memory_requirements.size,
-            memory_type_index,
-            ..Default::default()
-        };
+            base.device.bind_buffer_memory(buffer, memory, 0).unwrap();
 
-        let memory = device.allocate_memory(&allocate_info, None).unwrap();
+            BufferResource {
+                buffer,
+                memory,
+                size,
+                base,
+            }
+        }
+    }
 
-        ray_tracing
-            .bind_acceleration_structure_memory(&[
-                vk::BindAccelerationStructureMemoryInfoNV::builder()
-                    .acceleration_structure(accel_struct)
-                    .memory(memory)
-                    .memory_offset(0)
-                    .build(),
-            ])
-            .unwrap();
+    fn store<T: Copy>(&mut self, data: &[T]) {
+        unsafe {
+            let size = (std::mem::size_of::<T>() * data.len()) as u64;
+            let mapped_ptr = self.map(size);
+            let mut mapped_slice = Align::new(mapped_ptr, align_of::<T>() as u64, size);
+            mapped_slice.copy_from_slice(&data);
+            self.unmap();
+        }
+    }
 
-        let handle = ray_tracing
-            .get_acceleration_structure_handle(accel_struct)
-            .unwrap();
+    fn map(&mut self, size: vk::DeviceSize) -> *mut std::ffi::c_void {
+        unsafe {
+            let data: *mut std::ffi::c_void = self
+                .base
+                .device
+                .map_memory(self.memory, 0, size, vk::MemoryMapFlags::empty())
+                .unwrap();
+            data
+        }
+    }
 
-        AccelerationStructure {
-            memory,
-            accel_struct_info,
-            accel_struct,
-            handle,
+    fn unmap(&mut self) {
+        unsafe {
+            self.base.device.unmap_memory(self.memory);
         }
     }
 }
 
-/*
+impl Drop for BufferResource {
+    fn drop(&mut self) {
+        unsafe {
+            self.base.device.destroy_buffer(self.buffer, None);
+            self.base.device.free_memory(self.memory, None);
+        }
+    }
+}
 
+struct RayTracingApp {
+    top_as_memory: vk::DeviceMemory,
+    top_as: vk::AccelerationStructureNV,
+    bottom_as_memory: vk::DeviceMemory,
+    bottom_as: vk::AccelerationStructureNV,
+    descriptor_set_layout: vk::DescriptorSetLayout,
+    pipeline_layout: vk::PipelineLayout,
+    pipeline: vk::Pipeline,
+    shader_binding_table: BufferResource,
+    descriptor_pool: vk::DescriptorPool,
+    descriptor_set: vk::DescriptorSet,
+    base: Rc<ExampleBase>,
+    ray_tracing: Rc<nv::RayTracing>,
+    properties: vk::PhysicalDeviceRayTracingPropertiesNV,
+}
 
-
-    error = vkGetAccelerationStructureHandleNV(mDevice, _as.accelerationStructure, sizeof(uint64_t), &_as.handle);
-    if (VK_SUCCESS != error) {
-        CHECK_VK_ERROR(error, "vkGetAccelerationStructureHandleNVX");
-        return false;
+impl RayTracingApp {
+    fn initialize(&mut self) {
+        self.create_acceleration_structures();
+        self.create_pipeline();
+        self.create_shader_binding_table();
+        self.create_descriptor_set();
     }
 
-    return true;
+    fn create_acceleration_structures(&mut self) {}
+
+    fn create_pipeline(&mut self) {}
+
+    fn create_shader_binding_table(&mut self) {
+        let group_count = 3; // Listed in vk::RayTracingPipelineCreateInfoNV
+        let table_size = (self.properties.shader_group_handle_size * group_count) as u64;
+        let mut table_data: Vec<u8> = vec![0u8; table_size as usize];
+        unsafe {
+            self.ray_tracing
+                .get_ray_tracing_shader_group_handles(
+                    self.pipeline,
+                    0,
+                    group_count,
+                    &mut table_data,
+                )
+                .unwrap();
+        }
+        self.shader_binding_table = BufferResource::new(
+            table_size,
+            vk::BufferUsageFlags::TRANSFER_SRC,
+            vk::MemoryPropertyFlags::HOST_VISIBLE,
+            self.base.clone(),
+        );
+        self.shader_binding_table.store(&table_data);
+    }
+
+    fn create_descriptor_set(&mut self) {
+        unsafe {
+            let descriptor_sizes = [
+                vk::DescriptorPoolSize {
+                    ty: vk::DescriptorType::STORAGE_IMAGE,
+                    descriptor_count: 1,
+                },
+                vk::DescriptorPoolSize {
+                    ty: vk::DescriptorType::ACCELERATION_STRUCTURE_NV,
+                    descriptor_count: 1,
+                },
+            ];
+
+            let descriptor_pool_info = vk::DescriptorPoolCreateInfo::builder()
+                .pool_sizes(&descriptor_sizes)
+                .max_sets(1);
+
+            self.descriptor_pool = self
+                .base
+                .device
+                .create_descriptor_pool(&descriptor_pool_info, None)
+                .unwrap();
+
+            let layouts = vec![self.descriptor_set_layout];
+            let alloc_info = vk::DescriptorSetAllocateInfo::builder()
+                .descriptor_pool(self.descriptor_pool)
+                .set_layouts(&layouts);
+
+            let descriptor_sets = self
+                .base
+                .device
+                .allocate_descriptor_sets(&alloc_info)
+                .unwrap();
+            self.descriptor_set = descriptor_sets[0];
+
+            let mut accel_info = vk::WriteDescriptorSetAccelerationStructureNV::builder()
+                .acceleration_structures(&[self.top_as])
+                .build();
+            let accel_write = vk::WriteDescriptorSet::builder()
+                .dst_set(self.descriptor_set)
+                .dst_binding(0)
+                .dst_array_element(0)
+                .descriptor_type(vk::DescriptorType::ACCELERATION_STRUCTURE_NV)
+                .next(&mut accel_info)
+                .build();
+
+            let image_info = vk::DescriptorImageInfo::builder().build(); //image_view(self.offscreen_image_view).image_layout(vk::ImageLayout::GENERAL).build(); // TODO
+            let image_write = vk::WriteDescriptorSet::builder()
+                .dst_set(self.descriptor_set)
+                .dst_binding(1)
+                .dst_array_element(0)
+                .descriptor_type(vk::DescriptorType::STORAGE_IMAGE)
+                .image_info(&[image_info])
+                .build();
+
+            self.base
+                .device
+                .update_descriptor_sets(&[accel_write, image_write], &[]);
+        }
+    }
+
+    fn record_command_buffer(&mut self, command_buffer: vk::CommandBuffer) {
+        let handle_size = self.properties.shader_group_handle_size as u64;
+        // |[ raygen shader ]|[ hit shader  ]|[ miss shader ]|
+        // |                 |               |               |
+        // | 0               | 1             | 2             | 3
+        unsafe {
+            self.base.device.cmd_bind_pipeline(
+                command_buffer,
+                vk::PipelineBindPoint::RAY_TRACING_NV,
+                self.pipeline,
+            );
+            self.base.device.cmd_bind_descriptor_sets(
+                command_buffer,
+                vk::PipelineBindPoint::RAY_TRACING_NV,
+                self.pipeline_layout,
+                0,
+                &[self.descriptor_set],
+                &[],
+            );
+            self.ray_tracing.cmd_trace_rays(
+                command_buffer,
+                self.shader_binding_table.buffer,
+                0,
+                self.shader_binding_table.buffer,
+                2 * handle_size,
+                handle_size,
+                self.shader_binding_table.buffer,
+                1 * handle_size,
+                handle_size,
+                vk::Buffer::null(),
+                0,
+                0,
+                1920,
+                1080,
+                1,
+            )
+        }
+    }
 }
-*/
 
 fn main() {
     unsafe {
-        let base = ExampleBase::new(1920, 1080);
-        let ray_tracing = RayTracing::new(&base.instance, &base.device);
-        let renderpass_attachments = [
-            vk::AttachmentDescription {
-                format: base.surface_format.format,
-                samples: vk::SampleCountFlags::TYPE_1,
-                load_op: vk::AttachmentLoadOp::CLEAR,
-                store_op: vk::AttachmentStoreOp::STORE,
-                final_layout: vk::ImageLayout::PRESENT_SRC_KHR,
-                ..Default::default()
-            },
-            vk::AttachmentDescription {
-                format: vk::Format::D16_UNORM,
-                samples: vk::SampleCountFlags::TYPE_1,
-                load_op: vk::AttachmentLoadOp::CLEAR,
-                initial_layout: vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-                final_layout: vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-                ..Default::default()
-            },
-        ];
-        let color_attachment_refs = [vk::AttachmentReference {
-            attachment: 0,
-            layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-        }];
-        let depth_attachment_ref = vk::AttachmentReference {
-            attachment: 1,
-            layout: vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-        };
-        let dependencies = [vk::SubpassDependency {
-            src_subpass: vk::SUBPASS_EXTERNAL,
-            src_stage_mask: vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-            dst_access_mask: vk::AccessFlags::COLOR_ATTACHMENT_READ
-                | vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
-            dst_stage_mask: vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-            ..Default::default()
-        }];
+        let base = ExampleBase::new(1920, 1080, true);
+        let props_rt = nv::RayTracing::get_properties(&base.instance, base.pdevice);
+        let ray_tracing = nv::RayTracing::new(&base.instance, &base.device);
 
-        let subpasses = [vk::SubpassDescription::builder()
-            .color_attachments(&color_attachment_refs)
-            .depth_stencil_attachment(&depth_attachment_ref)
-            .pipeline_bind_point(vk::PipelineBindPoint::GRAPHICS)
-            .build()];
-
-        let renderpass_create_info = vk::RenderPassCreateInfo::builder()
-            .attachments(&renderpass_attachments)
-            .subpasses(&subpasses)
-            .dependencies(&dependencies);
-
-        let renderpass = base
-            .device
-            .create_render_pass(&renderpass_create_info, None)
-            .unwrap();
-
-        let framebuffers: Vec<vk::Framebuffer> = base
-            .present_image_views
-            .iter()
-            .map(|&present_image_view| {
-                let framebuffer_attachments = [present_image_view, base.depth_image_view];
-                let frame_buffer_create_info = vk::FramebufferCreateInfo::builder()
-                    .render_pass(renderpass)
-                    .attachments(&framebuffer_attachments)
-                    .width(base.surface_resolution.width)
-                    .height(base.surface_resolution.height)
-                    .layers(1);
-
-                base.device
-                    .create_framebuffer(&frame_buffer_create_info, None)
-                    .unwrap()
-            })
-            .collect();
-
-        let index_buffer_data = [0u32, 1, 2];
-        let index_buffer_info = vk::BufferCreateInfo::builder()
-            .size(std::mem::size_of_val(&index_buffer_data) as u64)
-            .usage(vk::BufferUsageFlags::INDEX_BUFFER)
-            .sharing_mode(vk::SharingMode::EXCLUSIVE);
-
-        let index_buffer = base.device.create_buffer(&index_buffer_info, None).unwrap();
-        let index_buffer_memory_req = base.device.get_buffer_memory_requirements(index_buffer);
-        let index_buffer_memory_index = find_memorytype_index(
-            &index_buffer_memory_req,
-            &base.device_memory_properties,
-            vk::MemoryPropertyFlags::HOST_VISIBLE,
-        )
-        .expect("Unable to find suitable memorytype for the index buffer.");
-
-        let index_allocate_info = vk::MemoryAllocateInfo {
-            allocation_size: index_buffer_memory_req.size,
-            memory_type_index: index_buffer_memory_index,
-            ..Default::default()
-        };
-        let index_buffer_memory = base
-            .device
-            .allocate_memory(&index_allocate_info, None)
-            .unwrap();
-        let index_ptr = base
-            .device
-            .map_memory(
-                index_buffer_memory,
-                0,
-                index_buffer_memory_req.size,
-                vk::MemoryMapFlags::empty(),
-            )
-            .unwrap();
-        let mut index_slice = Align::new(
-            index_ptr,
-            align_of::<u32>() as u64,
-            index_buffer_memory_req.size,
+        println!("NV Ray Tracing Properties:");
+        println!(
+            " shader_group_handle_size: {}",
+            props_rt.shader_group_handle_size
         );
-        index_slice.copy_from_slice(&index_buffer_data);
-        base.device.unmap_memory(index_buffer_memory);
-        base.device
-            .bind_buffer_memory(index_buffer, index_buffer_memory, 0)
-            .unwrap();
-
-        let vertex_input_buffer_info = vk::BufferCreateInfo {
-            size: 3 * std::mem::size_of::<Vertex>() as u64,
-            usage: vk::BufferUsageFlags::VERTEX_BUFFER,
-            sharing_mode: vk::SharingMode::EXCLUSIVE,
-            ..Default::default()
-        };
-
-        let vertex_input_buffer = base
-            .device
-            .create_buffer(&vertex_input_buffer_info, None)
-            .unwrap();
-
-        let vertex_input_buffer_memory_req = base
-            .device
-            .get_buffer_memory_requirements(vertex_input_buffer);
-
-        let vertex_input_buffer_memory_index = find_memorytype_index(
-            &vertex_input_buffer_memory_req,
-            &base.device_memory_properties,
-            vk::MemoryPropertyFlags::HOST_VISIBLE,
-        )
-        .expect("Unable to find suitable memorytype for the vertex buffer.");
-
-        let vertex_buffer_allocate_info = vk::MemoryAllocateInfo {
-            allocation_size: vertex_input_buffer_memory_req.size,
-            memory_type_index: vertex_input_buffer_memory_index,
-            ..Default::default()
-        };
-
-        let vertex_input_buffer_memory = base
-            .device
-            .allocate_memory(&vertex_buffer_allocate_info, None)
-            .unwrap();
-
-        let vertices = [
-            Vertex {
-                pos: [-1.0, 1.0, 0.0, 1.0],
-                color: [0.0, 1.0, 0.0, 1.0],
-            },
-            Vertex {
-                pos: [1.0, 1.0, 0.0, 1.0],
-                color: [0.0, 0.0, 1.0, 1.0],
-            },
-            Vertex {
-                pos: [0.0, -1.0, 0.0, 1.0],
-                color: [1.0, 0.0, 0.0, 1.0],
-            },
-        ];
-
-        let vert_ptr = base
-            .device
-            .map_memory(
-                vertex_input_buffer_memory,
-                0,
-                vertex_input_buffer_memory_req.size,
-                vk::MemoryMapFlags::empty(),
-            )
-            .unwrap();
-
-        let mut vert_align = Align::new(
-            vert_ptr,
-            align_of::<Vertex>() as u64,
-            vertex_input_buffer_memory_req.size,
+        println!(" max_recursion_depth: {}", props_rt.max_recursion_depth);
+        println!(
+            " max_shader_group_stride: {}",
+            props_rt.max_shader_group_stride
         );
-        vert_align.copy_from_slice(&vertices);
-        base.device.unmap_memory(vertex_input_buffer_memory);
-        base.device
-            .bind_buffer_memory(vertex_input_buffer, vertex_input_buffer_memory, 0)
-            .unwrap();
-        let mut vertex_spv_file = File::open(Path::new("shader/nv_ray_tracing/vert.spv"))
-            .expect("Could not find vert.spv.");
-        let mut frag_spv_file = File::open(Path::new("shader/nv_ray_tracing/frag.spv"))
-            .expect("Could not find frag.spv.");
+        println!(
+            " shader_group_base_alignment: {}",
+            props_rt.shader_group_base_alignment
+        );
+        println!(" max_geometry_count: {}", props_rt.max_geometry_count);
+        println!(" max_instance_count: {}", props_rt.max_instance_count);
+        println!(" max_triangle_count: {}", props_rt.max_triangle_count);
+        println!(
+            " max_descriptor_set_acceleration_structures: {}",
+            props_rt.max_descriptor_set_acceleration_structures
+        );
 
-        let vertex_code =
-            read_spv(&mut vertex_spv_file).expect("Failed to read vertex shader spv file");
-        let vertex_shader_info = vk::ShaderModuleCreateInfo::builder().code(&vertex_code);
-
-        let frag_code =
-            read_spv(&mut frag_spv_file).expect("Failed to read fragment shader spv file");
-        let frag_shader_info = vk::ShaderModuleCreateInfo::builder().code(&frag_code);
-
-        let vertex_shader_module = base
-            .device
-            .create_shader_module(&vertex_shader_info, None)
-            .expect("Vertex shader module error");
-
-        let fragment_shader_module = base
-            .device
-            .create_shader_module(&frag_shader_info, None)
-            .expect("Fragment shader module error");
-
-        let layout_create_info = vk::PipelineLayoutCreateInfo::default();
-
-        let pipeline_layout = base
-            .device
-            .create_pipeline_layout(&layout_create_info, None)
-            .unwrap();
-
-        let shader_entry_name = CString::new("main").unwrap();
-        let shader_stage_create_infos = [
-            vk::PipelineShaderStageCreateInfo {
-                module: vertex_shader_module,
-                p_name: shader_entry_name.as_ptr(),
-                stage: vk::ShaderStageFlags::VERTEX,
-                ..Default::default()
-            },
-            vk::PipelineShaderStageCreateInfo {
-                s_type: vk::StructureType::PIPELINE_SHADER_STAGE_CREATE_INFO,
-                module: fragment_shader_module,
-                p_name: shader_entry_name.as_ptr(),
-                stage: vk::ShaderStageFlags::FRAGMENT,
-                ..Default::default()
-            },
-        ];
-        let vertex_input_binding_descriptions = [vk::VertexInputBindingDescription {
-            binding: 0,
-            stride: mem::size_of::<Vertex>() as u32,
-            input_rate: vk::VertexInputRate::VERTEX,
-        }];
-        let vertex_input_attribute_descriptions = [
-            vk::VertexInputAttributeDescription {
-                location: 0,
-                binding: 0,
-                format: vk::Format::R32G32B32A32_SFLOAT,
-                offset: offset_of!(Vertex, pos) as u32,
-            },
-            vk::VertexInputAttributeDescription {
-                location: 1,
-                binding: 0,
-                format: vk::Format::R32G32B32A32_SFLOAT,
-                offset: offset_of!(Vertex, color) as u32,
-            },
-        ];
-
-        let vertex_input_state_info = vk::PipelineVertexInputStateCreateInfo {
-            vertex_attribute_description_count: vertex_input_attribute_descriptions.len() as u32,
-            p_vertex_attribute_descriptions: vertex_input_attribute_descriptions.as_ptr(),
-            vertex_binding_description_count: vertex_input_binding_descriptions.len() as u32,
-            p_vertex_binding_descriptions: vertex_input_binding_descriptions.as_ptr(),
-            ..Default::default()
-        };
-        let vertex_input_assembly_state_info = vk::PipelineInputAssemblyStateCreateInfo {
-            topology: vk::PrimitiveTopology::TRIANGLE_LIST,
-            ..Default::default()
-        };
-        let viewports = [vk::Viewport {
-            x: 0.0,
-            y: 0.0,
-            width: base.surface_resolution.width as f32,
-            height: base.surface_resolution.height as f32,
-            min_depth: 0.0,
-            max_depth: 1.0,
-        }];
-        let scissors = [vk::Rect2D {
-            offset: vk::Offset2D { x: 0, y: 0 },
-            extent: base.surface_resolution.clone(),
-        }];
-        let viewport_state_info = vk::PipelineViewportStateCreateInfo::builder()
-            .scissors(&scissors)
-            .viewports(&viewports);
-
-        let rasterization_info = vk::PipelineRasterizationStateCreateInfo {
-            front_face: vk::FrontFace::COUNTER_CLOCKWISE,
-            line_width: 1.0,
-            polygon_mode: vk::PolygonMode::FILL,
-            ..Default::default()
-        };
-        let multisample_state_info = vk::PipelineMultisampleStateCreateInfo {
-            rasterization_samples: vk::SampleCountFlags::TYPE_1,
-            ..Default::default()
-        };
-        let noop_stencil_state = vk::StencilOpState {
-            fail_op: vk::StencilOp::KEEP,
-            pass_op: vk::StencilOp::KEEP,
-            depth_fail_op: vk::StencilOp::KEEP,
-            compare_op: vk::CompareOp::ALWAYS,
-            ..Default::default()
-        };
-        let depth_state_info = vk::PipelineDepthStencilStateCreateInfo {
-            depth_test_enable: 1,
-            depth_write_enable: 1,
-            depth_compare_op: vk::CompareOp::LESS_OR_EQUAL,
-            front: noop_stencil_state.clone(),
-            back: noop_stencil_state.clone(),
-            max_depth_bounds: 1.0,
-            ..Default::default()
-        };
-        let color_blend_attachment_states = [vk::PipelineColorBlendAttachmentState {
-            blend_enable: 0,
-            src_color_blend_factor: vk::BlendFactor::SRC_COLOR,
-            dst_color_blend_factor: vk::BlendFactor::ONE_MINUS_DST_COLOR,
-            color_blend_op: vk::BlendOp::ADD,
-            src_alpha_blend_factor: vk::BlendFactor::ZERO,
-            dst_alpha_blend_factor: vk::BlendFactor::ZERO,
-            alpha_blend_op: vk::BlendOp::ADD,
-            color_write_mask: vk::ColorComponentFlags::all(),
-        }];
-        let color_blend_state = vk::PipelineColorBlendStateCreateInfo::builder()
-            .logic_op(vk::LogicOp::CLEAR)
-            .attachments(&color_blend_attachment_states);
-
-        let dynamic_state = [vk::DynamicState::VIEWPORT, vk::DynamicState::SCISSOR];
-        let dynamic_state_info =
-            vk::PipelineDynamicStateCreateInfo::builder().dynamic_states(&dynamic_state);
-
-        let graphic_pipeline_info = vk::GraphicsPipelineCreateInfo::builder()
-            .stages(&shader_stage_create_infos)
-            .vertex_input_state(&vertex_input_state_info)
-            .input_assembly_state(&vertex_input_assembly_state_info)
-            .viewport_state(&viewport_state_info)
-            .rasterization_state(&rasterization_info)
-            .multisample_state(&multisample_state_info)
-            .depth_stencil_state(&depth_state_info)
-            .color_blend_state(&color_blend_state)
-            .dynamic_state(&dynamic_state_info)
-            .layout(pipeline_layout)
-            .render_pass(renderpass);
-
-        let graphics_pipelines = base
-            .device
-            .create_graphics_pipelines(
-                vk::PipelineCache::null(),
-                &[graphic_pipeline_info.build()],
-                None,
-            )
-            .expect("Unable to create graphics pipeline");
-
-        let graphic_pipeline = graphics_pipelines[0];
+        return;
 
         base.render_loop(|| {
             let (present_index, _) = base
@@ -464,28 +294,6 @@ fn main() {
                     vk::Fence::null(),
                 )
                 .unwrap();
-            let clear_values = [
-                vk::ClearValue {
-                    color: vk::ClearColorValue {
-                        float32: [0.0, 0.0, 0.0, 0.0],
-                    },
-                },
-                vk::ClearValue {
-                    depth_stencil: vk::ClearDepthStencilValue {
-                        depth: 1.0,
-                        stencil: 0,
-                    },
-                },
-            ];
-
-            let render_pass_begin_info = vk::RenderPassBeginInfo::builder()
-                .render_pass(renderpass)
-                .framebuffer(framebuffers[present_index as usize])
-                .render_area(vk::Rect2D {
-                    offset: vk::Offset2D { x: 0, y: 0 },
-                    extent: base.surface_resolution.clone(),
-                })
-                .clear_values(&clear_values);
 
             record_submit_commandbuffer(
                 &base.device,
@@ -495,49 +303,15 @@ fn main() {
                 &[base.present_complete_semaphore],
                 &[base.rendering_complete_semaphore],
                 |device, draw_command_buffer| {
-                    device.cmd_begin_render_pass(
-                        draw_command_buffer,
-                        &render_pass_begin_info,
-                        vk::SubpassContents::INLINE,
-                    );
-                    device.cmd_bind_pipeline(
-                        draw_command_buffer,
-                        vk::PipelineBindPoint::GRAPHICS,
-                        graphic_pipeline,
-                    );
-                    device.cmd_set_viewport(draw_command_buffer, 0, &viewports);
-                    device.cmd_set_scissor(draw_command_buffer, 0, &scissors);
-                    device.cmd_bind_vertex_buffers(
-                        draw_command_buffer,
-                        0,
-                        &[vertex_input_buffer],
-                        &[0],
-                    );
-                    device.cmd_bind_index_buffer(
-                        draw_command_buffer,
-                        index_buffer,
-                        0,
-                        vk::IndexType::UINT32,
-                    );
-                    device.cmd_draw_indexed(
-                        draw_command_buffer,
-                        index_buffer_data.len() as u32,
-                        1,
-                        0,
-                        0,
-                        1,
-                    );
-                    // Or draw without the index buffer
-                    // device.cmd_draw(draw_command_buffer, 3, 1, 0, 0);
-                    device.cmd_end_render_pass(draw_command_buffer);
+                    //
                 },
             );
-            //let mut present_info_err = mem::uninitialized();
+
             let wait_semaphors = [base.rendering_complete_semaphore];
             let swapchains = [base.swapchain];
             let image_indices = [present_index];
             let present_info = vk::PresentInfoKHR::builder()
-                .wait_semaphores(&wait_semaphors) // &base.rendering_complete_semaphore)
+                .wait_semaphores(&wait_semaphors)
                 .swapchains(&swapchains)
                 .image_indices(&image_indices);
 
@@ -547,7 +321,7 @@ fn main() {
         });
 
         base.device.device_wait_idle().unwrap();
-        for pipeline in graphics_pipelines {
+        /*for pipeline in graphics_pipelines {
             base.device.destroy_pipeline(pipeline, None);
         }
         base.device.destroy_pipeline_layout(pipeline_layout, None);
@@ -562,6 +336,6 @@ fn main() {
         for framebuffer in framebuffers {
             base.device.destroy_framebuffer(framebuffer, None);
         }
-        base.device.destroy_render_pass(renderpass, None);
+        base.device.destroy_render_pass(renderpass, None);*/
     }
 }
