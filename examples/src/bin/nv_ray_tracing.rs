@@ -312,7 +312,9 @@ impl RayTracingApp {
 
     fn initialize(&mut self) {
         self.create_offscreen_target();
+        println!("creating acceleration structures!");
         self.create_acceleration_structures();
+        println!("done creating acceleration structures");
         self.create_pipeline();
         self.create_shader_binding_table();
         self.create_descriptor_set();
@@ -439,7 +441,6 @@ impl RayTracingApp {
                 .info(
                     vk::AccelerationStructureInfoNV::builder()
                         .ty(vk::AccelerationStructureTypeNV::BOTTOM_LEVEL)
-                        .instance_count(1)
                         .geometries(&geometry)
                         .build(),
                 )
@@ -654,6 +655,8 @@ impl RayTracingApp {
                 build_command_buffer,
                 vk::PipelineStageFlags::ACCELERATION_STRUCTURE_BUILD_NV,
                 vk::PipelineStageFlags::ACCELERATION_STRUCTURE_BUILD_NV,
+                //vk::PipelineStageFlags::RAY_TRACING_SHADER_NV,
+                //vk::PipelineStageFlags::RAY_TRACING_SHADER_NV,
                 vk::DependencyFlags::empty(),
                 &[memory_barrier],
                 &[],
@@ -666,7 +669,7 @@ impl RayTracingApp {
                     .ty(vk::AccelerationStructureTypeNV::TOP_LEVEL)
                     .instance_count(1)
                     .build(),
-                vk::Buffer::null(),
+                instance_buffer.buffer,
                 0,
                 false,
                 self.top_as,
@@ -678,6 +681,7 @@ impl RayTracingApp {
             self.base.device.cmd_pipeline_barrier(
                 build_command_buffer,
                 vk::PipelineStageFlags::ACCELERATION_STRUCTURE_BUILD_NV,
+                //vk::PipelineStageFlags::RAY_TRACING_SHADER_NV,
                 vk::PipelineStageFlags::RAY_TRACING_SHADER_NV,
                 vk::DependencyFlags::empty(),
                 &[memory_barrier],
@@ -699,10 +703,16 @@ impl RayTracingApp {
                 .queue_submit(self.base.present_queue, &[submit_info], vk::Fence::null())
                 .expect("queue submit failed.");
 
-            self.base
+            match self.base
                 .device
-                .queue_wait_idle(self.base.present_queue)
-                .unwrap();
+                .queue_wait_idle(self.base.present_queue) {
+                Ok(_) => println!("Successfully built acceleration structures"),
+                Err(err) => {
+                    println!("Failed to build acceleration structures: {:?}", err);
+                    panic!("BLAH");
+                },
+            }
+
             self.base
                 .device
                 .free_command_buffers(self.base.pool, &[build_command_buffer]);

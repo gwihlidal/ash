@@ -26,10 +26,10 @@ use std::mem;
 use ash::extensions::khr::XlibSurface;
 use ash::extensions::{
     ext::{
-        memory_requirements2_name, physical_device_properties2_name, maintenance1_name, maintenance2_name, maintenance3_name, DebugReport,
+        DebugReport,
         DescriptorIndexing,
     },
-    khr::{Surface, Swapchain},
+    khr::{Surface, Swapchain, memory_requirements2_name, physical_device_properties2_name, maintenance1_name, maintenance2_name, maintenance3_name},
 };
 
 #[cfg(target_os = "windows")]
