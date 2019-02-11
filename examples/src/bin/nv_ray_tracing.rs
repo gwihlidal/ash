@@ -906,7 +906,8 @@ impl RayTracingApp {
             let mut accel_info = vk::WriteDescriptorSetAccelerationStructureNV::builder()
                 .acceleration_structures(&[self.top_as])
                 .build();
-            let accel_write = vk::WriteDescriptorSet::builder()
+
+            let mut accel_write = vk::WriteDescriptorSet::builder()
                 .dst_set(self.descriptor_set)
                 .dst_binding(0)
                 .dst_array_element(0)
@@ -914,10 +915,14 @@ impl RayTracingApp {
                 .next(&mut accel_info)
                 .build();
 
+            // This is only set by the builder for images, buffers, or views; need to set explicitly after
+            accel_write.descriptor_count = 1;
+
             let image_info = vk::DescriptorImageInfo::builder()
                 .image_layout(vk::ImageLayout::GENERAL)
                 .image_view(self.offscreen_target.view)
                 .build();
+
             let image_write = vk::WriteDescriptorSet::builder()
                 .dst_set(self.descriptor_set)
                 .dst_binding(1)
