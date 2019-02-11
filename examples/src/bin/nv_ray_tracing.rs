@@ -319,9 +319,7 @@ impl RayTracingApp {
 
     fn initialize(&mut self) {
         self.create_offscreen_target();
-        println!("creating acceleration structures!");
         self.create_acceleration_structures();
-        println!("done creating acceleration structures");
         self.create_pipeline();
         self.create_shader_binding_table();
         self.create_descriptor_set();
@@ -747,7 +745,7 @@ impl RayTracingApp {
             let layout_info = vk::DescriptorSetLayoutCreateInfo::builder()
                 .bindings(&[accel_binding, output_binding])
                 .build();
-            self.base
+            self.descriptor_set_layout = self.base
                 .device
                 .create_descriptor_set_layout(&layout_info, None)
                 .unwrap();
