@@ -50,7 +50,7 @@ impl GeometryInstance {
     }
 
     fn set_id(&mut self, id: u32) {
-        let id = (id & 0x00ffffff) << 24;
+        let id = (id & 0x00ffffff) << 8;
         self.instance_id_and_mask |= id;
     }
 
@@ -59,13 +59,123 @@ impl GeometryInstance {
     }
 
     fn set_offset(&mut self, offset: u32) {
-        let offset = (offset & 0x00ffffff) << 24;
+        let offset = (offset & 0x00ffffff) << 8;
         self.instance_offset_and_flags |= offset;
     }
 
     fn set_flags(&mut self, flags: vk::GeometryInstanceFlagsNV) {
         let flags = flags.as_raw() as u32;
         self.instance_offset_and_flags |= flags;
+    }
+}
+
+#[derive(Clone)]
+struct ImageResource {
+    image: vk::Image,
+    memory: vk::DeviceMemory,
+    view: vk::ImageView,
+    sampler: vk::Sampler,
+    base: Rc<ExampleBase>,
+}
+
+impl ImageResource {
+    fn new(base: Rc<ExampleBase>) -> Self {
+        ImageResource {
+            image: vk::Image::null(),
+            memory: vk::DeviceMemory::null(),
+            view: vk::ImageView::null(),
+            sampler: vk::Sampler::null(),
+            base,
+        }
+    }
+
+    fn create_image(
+        &mut self,
+        image_type: vk::ImageType,
+        format: vk::Format,
+        extent: vk::Extent3D,
+        tiling: vk::ImageTiling,
+        usage: vk::ImageUsageFlags,
+        memory_flags: vk::MemoryPropertyFlags,
+    ) {
+        unsafe {
+            let create_info = vk::ImageCreateInfo::builder()
+                .image_type(image_type)
+                .format(format)
+                .extent(extent)
+                .mip_levels(1)
+                .array_layers(1)
+                .samples(vk::SampleCountFlags::TYPE_1)
+                .tiling(tiling)
+                .usage(usage)
+                .sharing_mode(vk::SharingMode::EXCLUSIVE)
+                .initial_layout(vk::ImageLayout::UNDEFINED)
+                .build();
+
+            self.image = self.base.device.create_image(&create_info, None).unwrap();
+
+            let requirements = self.base.device.get_image_memory_requirements(self.image);
+            let memory_index = find_memorytype_index(
+                &requirements,
+                &self.base.device_memory_properties,
+                memory_flags,
+            )
+            .expect("Unable to find suitable memory index image.");
+
+            let allocate_info = vk::MemoryAllocateInfo {
+                allocation_size: requirements.size,
+                memory_type_index: memory_index,
+                ..Default::default()
+            };
+
+            self.memory = self
+                .base
+                .device
+                .allocate_memory(&allocate_info, None)
+                .unwrap();
+
+            self.base
+                .device
+                .bind_image_memory(self.image, self.memory, 0)
+                .expect("Unable to bind image memory");
+        }
+    }
+
+    fn create_view(
+        &mut self,
+        view_type: vk::ImageViewType,
+        format: vk::Format,
+        range: vk::ImageSubresourceRange,
+    ) {
+        let create_info = vk::ImageViewCreateInfo::builder()
+            .view_type(view_type)
+            .format(format)
+            .subresource_range(range)
+            .image(self.image)
+            .components(vk::ComponentMapping {
+                r: vk::ComponentSwizzle::R,
+                g: vk::ComponentSwizzle::G,
+                b: vk::ComponentSwizzle::B,
+                a: vk::ComponentSwizzle::A,
+            })
+            .build();
+        self.view = unsafe {
+            self.base
+                .device
+                .create_image_view(&create_info, None)
+                .unwrap()
+        };
+    }
+}
+
+impl Drop for ImageResource {
+    fn drop(&mut self) {
+        unsafe {
+            self.base.device.destroy_image_view(self.view, None);
+            self.base.device.free_memory(self.memory, None);
+            self.base.device.destroy_image(self.image, None);
+            self.base.device.destroy_sampler(self.sampler, None);
+        }
     }
 }
 
@@ -173,6 +283,7 @@ struct RayTracingApp {
     shader_binding_table: Option<BufferResource>,
     descriptor_pool: vk::DescriptorPool,
     descriptor_set: vk::DescriptorSet,
+    offscreen_target: ImageResource,
 }
 
 impl RayTracingApp {
@@ -182,7 +293,7 @@ impl RayTracingApp {
         properties: vk::PhysicalDeviceRayTracingPropertiesNV,
     ) -> Self {
         RayTracingApp {
-            base,
+            base: base.clone(),
             ray_tracing,
             properties,
             top_as_memory: vk::DeviceMemory::null(),
@@ -195,10 +306,12 @@ impl RayTracingApp {
             shader_binding_table: None,
             descriptor_pool: vk::DescriptorPool::null(),
             descriptor_set: vk::DescriptorSet::null(),
+            offscreen_target: ImageResource::new(base),
         }
     }
 
     fn initialize(&mut self) {
+        self.create_offscreen_target();
         self.create_acceleration_structures();
         self.create_pipeline();
         self.create_shader_binding_table();
@@ -231,6 +344,33 @@ impl RayTracingApp {
                 .device
                 .destroy_descriptor_set_layout(self.descriptor_set_layout, None);
         }
+    }
+
+    fn create_offscreen_target(&mut self) {
+        self.offscreen_target.create_image(
+            vk::ImageType::TYPE_2D,
+            self.base.surface_format.format,
+            vk::Extent3D::builder()
+                .width(1920)
+                .height(1080)
+                .depth(1)
+                .build(),
+            vk::ImageTiling::OPTIMAL,
+            vk::ImageUsageFlags::STORAGE | vk::ImageUsageFlags::TRANSFER_SRC,
+            vk::MemoryPropertyFlags::DEVICE_LOCAL,
+        );
+
+        self.offscreen_target.create_view(
+            vk::ImageViewType::TYPE_2D,
+            self.base.surface_format.format,
+            vk::ImageSubresourceRange {
+                aspect_mask: vk::ImageAspectFlags::COLOR,
+                base_mip_level: 0,
+                level_count: 1,
+                base_array_layer: 0,
+                layer_count: 1,
+            },
+        );
     }
 
     fn create_acceleration_structures(&mut self) {
@@ -545,7 +685,10 @@ impl RayTracingApp {
                 &[],
             );
 
-            self.base.device.end_command_buffer(build_command_buffer).unwrap();
+            self.base
+                .device
+                .end_command_buffer(build_command_buffer)
+                .unwrap();
 
             let submit_info = vk::SubmitInfo::builder()
                 .command_buffers(&[build_command_buffer])
@@ -754,7 +897,8 @@ impl RayTracingApp {
 
             let image_info = vk::DescriptorImageInfo::builder()
                 .image_layout(vk::ImageLayout::GENERAL)
-                .build(); //image_view(self.offscreen_image_view) // TODO
+                .image_view(self.offscreen_target.view)
+                .build();
             let image_write = vk::WriteDescriptorSet::builder()
                 .dst_set(self.descriptor_set)
                 .dst_binding(1)
@@ -769,7 +913,130 @@ impl RayTracingApp {
         }
     }
 
-    fn record_command_buffer(&self, command_buffer: vk::CommandBuffer) {
+    fn record_image_barrier(
+        &self,
+        command_buffer: vk::CommandBuffer,
+        image: vk::Image,
+        range: vk::ImageSubresourceRange,
+        src_access: vk::AccessFlags,
+        dst_access: vk::AccessFlags,
+        old_layout: vk::ImageLayout,
+        new_layout: vk::ImageLayout,
+    ) {
+        let barrier = vk::ImageMemoryBarrier::builder()
+            .src_access_mask(src_access)
+            .dst_access_mask(dst_access)
+            .old_layout(old_layout)
+            .new_layout(new_layout)
+            .image(image)
+            .subresource_range(range)
+            .build();
+        unsafe {
+            self.base.device.cmd_pipeline_barrier(
+                command_buffer,
+                vk::PipelineStageFlags::ALL_COMMANDS,
+                vk::PipelineStageFlags::ALL_COMMANDS,
+                vk::DependencyFlags::empty(),
+                &[],
+                &[],
+                &[barrier],
+            );
+        }
+    }
+
+    fn record_command_buffer(&self, present_image: vk::Image, command_buffer: vk::CommandBuffer) {
+        //let begin_info = vk::CommandBufferBeginInfo::builder().build();
+        let range = vk::ImageSubresourceRange {
+            aspect_mask: vk::ImageAspectFlags::COLOR,
+            base_mip_level: 0,
+            level_count: 1,
+            base_array_layer: 0,
+            layer_count: 1,
+        };
+
+        //self.base
+        //    .device
+        //    .begin_command_buffer(command_buffer, &begin_info);
+
+        self.record_image_barrier(
+            command_buffer,
+            self.offscreen_target.image,
+            range.clone(),
+            vk::AccessFlags::empty(),
+            vk::AccessFlags::SHADER_WRITE,
+            vk::ImageLayout::UNDEFINED,
+            vk::ImageLayout::GENERAL,
+        );
+
+        self.record_ray_tracing(command_buffer);
+
+        self.record_image_barrier(
+            command_buffer,
+            present_image,
+            range.clone(),
+            vk::AccessFlags::empty(),
+            vk::AccessFlags::TRANSFER_WRITE,
+            vk::ImageLayout::UNDEFINED,
+            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+        );
+
+        self.record_image_barrier(
+            command_buffer,
+            self.offscreen_target.image,
+            range.clone(),
+            vk::AccessFlags::SHADER_WRITE,
+            vk::AccessFlags::TRANSFER_READ,
+            vk::ImageLayout::GENERAL,
+            vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+        );
+
+        let region = vk::ImageCopy::builder()
+            .src_subresource(
+                vk::ImageSubresourceLayers::builder()
+                    .aspect_mask(vk::ImageAspectFlags::COLOR)
+                    .layer_count(1)
+                    .build(),
+            )
+            .dst_subresource(
+                vk::ImageSubresourceLayers::builder()
+                    .aspect_mask(vk::ImageAspectFlags::COLOR)
+                    .layer_count(1)
+                    .build(),
+            )
+            .extent(
+                vk::Extent3D::builder()
+                    .width(1920)
+                    .height(1080)
+                    .depth(1)
+                    .build(),
+            )
+            .build();
+
+        unsafe {
+            self.base.device.cmd_copy_image(
+                command_buffer,
+                self.offscreen_target.image,
+                vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+                present_image,
+                vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                &[region],
+            );
+        }
+
+        self.record_image_barrier(
+            command_buffer,
+            present_image,
+            range.clone(),
+            vk::AccessFlags::TRANSFER_WRITE,
+            vk::AccessFlags::empty(),
+            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+            vk::ImageLayout::PRESENT_SRC_KHR,
+        );
+
+        //self.base.device.end_command_buffer(command_buffer);
+    }
+
+    fn record_ray_tracing(&self, command_buffer: vk::CommandBuffer) {
         if let Some(ref shader_binding_table) = self.shader_binding_table {
             let handle_size = self.properties.shader_group_handle_size as u64;
             // |[ raygen shader ]|[ hit shader  ]|[ miss shader ]|
@@ -860,15 +1127,16 @@ fn main() {
                 &[base.present_complete_semaphore],
                 &[base.rendering_complete_semaphore],
                 |_device, command_buffer| {
-                    app.record_command_buffer(command_buffer);
+                    let present_image = base.present_images[present_index as usize];
+                    app.record_command_buffer(present_image, command_buffer);
                 },
             );
 
-            let wait_semaphors = [base.rendering_complete_semaphore];
+            let wait_semaphores = [base.rendering_complete_semaphore];
             let swapchains = [base.swapchain];
             let image_indices = [present_index];
             let present_info = vk::PresentInfoKHR::builder()
-                .wait_semaphores(&wait_semaphors)
+                .wait_semaphores(&wait_semaphores)
                 .swapchains(&swapchains)
                 .image_indices(&image_indices);
 
