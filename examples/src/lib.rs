@@ -26,7 +26,7 @@ use std::mem;
 use ash::extensions::khr::XlibSurface;
 use ash::extensions::{
     ext::{
-        memory_requirements2_name, physical_device_properties2_name, DebugReport,
+        memory_requirements2_name, physical_device_properties2_name, maintenance1_name, maintenance2_name, maintenance3_name, DebugReport,
         DescriptorIndexing,
     },
     khr::{Surface, Swapchain},
@@ -41,6 +41,7 @@ use ash::extensions::nv::RayTracing;
 use ash::extensions::khr::Win32Surface;
 #[cfg(target_os = "macos")]
 use ash::extensions::mvk::MacOSSurface;
+pub use ash::version::{DeviceV1_1, EntryV1_1, InstanceV1_1};
 pub use ash::version::{DeviceV1_0, EntryV1_0, InstanceV1_0};
 use ash::{vk, Device, Entry, Instance};
 use std::cell::RefCell;
@@ -61,7 +62,7 @@ macro_rules! offset_of {
     }};
 }
 
-pub fn record_submit_commandbuffer<D: DeviceV1_0, F: FnOnce(&D, vk::CommandBuffer)>(
+pub fn record_submit_commandbuffer<D: DeviceV1_1, F: FnOnce(&D, vk::CommandBuffer)>(
     device: &D,
     command_buffer: vk::CommandBuffer,
     submit_queue: vk::Queue,
@@ -192,6 +193,7 @@ fn extension_names() -> Vec<*const i8> {
         Surface::name().as_ptr(),
         XlibSurface::name().as_ptr(),
         DebugReport::name().as_ptr(),
+        physical_device_properties2_name().as_ptr(),
     ]
 }
 
@@ -210,6 +212,7 @@ fn extension_names() -> Vec<*const i8> {
         Surface::name().as_ptr(),
         Win32Surface::name().as_ptr(),
         DebugReport::name().as_ptr(),
+        physical_device_properties2_name().as_ptr(),
     ]
 }
 
@@ -349,7 +352,7 @@ impl ExampleBase {
                 .application_version(0)
                 .engine_name(&app_name)
                 .engine_version(0)
-                .api_version(vk_make_version!(1, 0, 36));
+                .api_version(vk_make_version!(1, 1, 0));
 
             let create_info = vk::InstanceCreateInfo::builder()
                 .application_info(&appinfo)
@@ -409,8 +412,7 @@ impl ExampleBase {
                     Swapchain::name().as_ptr(),
                     RayTracing::name().as_ptr(),
                     DescriptorIndexing::name().as_ptr(),
-                    memory_requirements2_name().as_ptr(),
-                ] //, physical_device_properties2_name().as_ptr()]
+                    memory_requirements2_name().as_ptr()]
             } else {
                 vec![Swapchain::name().as_ptr()]
             };
