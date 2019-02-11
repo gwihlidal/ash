@@ -724,12 +724,14 @@ impl RayTracingApp {
                 .descriptor_count(1)
                 .descriptor_type(vk::DescriptorType::ACCELERATION_STRUCTURE_NV)
                 .stage_flags(vk::ShaderStageFlags::RAYGEN_NV)
+                .binding(0)
                 .build();
 
             let output_binding = vk::DescriptorSetLayoutBinding::builder()
                 .descriptor_count(1)
                 .descriptor_type(vk::DescriptorType::STORAGE_IMAGE)
                 .stage_flags(vk::ShaderStageFlags::RAYGEN_NV)
+                .binding(1)
                 .build();
 
             let layout_info = vk::DescriptorSetLayoutCreateInfo::builder()
