@@ -703,14 +703,12 @@ impl RayTracingApp {
                 .queue_submit(self.base.present_queue, &[submit_info], vk::Fence::null())
                 .expect("queue submit failed.");
 
-            match self.base
-                .device
-                .queue_wait_idle(self.base.present_queue) {
+            match self.base.device.queue_wait_idle(self.base.present_queue) {
                 Ok(_) => println!("Successfully built acceleration structures"),
                 Err(err) => {
                     println!("Failed to build acceleration structures: {:?}", err);
                     panic!("BLAH");
-                },
+                }
             }
 
             self.base

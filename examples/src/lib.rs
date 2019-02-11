@@ -25,11 +25,11 @@ use std::mem;
 #[cfg(all(unix, not(target_os = "android"), not(target_os = "macos")))]
 use ash::extensions::khr::XlibSurface;
 use ash::extensions::{
-    ext::{
-        DebugReport,
-        DescriptorIndexing,
+    ext::{DebugReport, DescriptorIndexing},
+    khr::{
+        maintenance1_name, maintenance2_name, maintenance3_name, memory_requirements2_name,
+        physical_device_properties2_name, Surface, Swapchain,
     },
-    khr::{Surface, Swapchain, memory_requirements2_name, physical_device_properties2_name, maintenance1_name, maintenance2_name, maintenance3_name},
 };
 
 #[cfg(target_os = "windows")]
@@ -41,8 +41,8 @@ use ash::extensions::nv::RayTracing;
 use ash::extensions::khr::Win32Surface;
 #[cfg(target_os = "macos")]
 use ash::extensions::mvk::MacOSSurface;
-pub use ash::version::{DeviceV1_1, EntryV1_1, InstanceV1_1};
 pub use ash::version::{DeviceV1_0, EntryV1_0, InstanceV1_0};
+pub use ash::version::{DeviceV1_1, EntryV1_1, InstanceV1_1};
 use ash::{vk, Device, Entry, Instance};
 use std::cell::RefCell;
 use std::default::Default;
@@ -412,7 +412,8 @@ impl ExampleBase {
                     Swapchain::name().as_ptr(),
                     RayTracing::name().as_ptr(),
                     DescriptorIndexing::name().as_ptr(),
-                    memory_requirements2_name().as_ptr()]
+                    memory_requirements2_name().as_ptr(),
+                ]
             } else {
                 vec![Swapchain::name().as_ptr()]
             };
