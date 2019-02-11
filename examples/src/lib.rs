@@ -420,6 +420,7 @@ impl ExampleBase {
 
             let features = vk::PhysicalDeviceFeatures {
                 shader_clip_distance: 1,
+                vertex_pipeline_stores_and_atomics: 1,
                 ..Default::default()
             };
             let priorities = [1.0];
