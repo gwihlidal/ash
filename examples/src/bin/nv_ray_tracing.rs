@@ -285,6 +285,9 @@ struct RayTracingApp {
     descriptor_pool: vk::DescriptorPool,
     descriptor_set: vk::DescriptorSet,
     offscreen_target: ImageResource,
+    rgen_shader_module: vk::ShaderModule,
+    chit_shader_module: vk::ShaderModule,
+    miss_shader_module: vk::ShaderModule,
 }
 
 impl RayTracingApp {
@@ -308,6 +311,9 @@ impl RayTracingApp {
             descriptor_pool: vk::DescriptorPool::null(),
             descriptor_set: vk::DescriptorSet::null(),
             offscreen_target: ImageResource::new(base),
+            rgen_shader_module: vk::ShaderModule::null(),
+            chit_shader_module: vk::ShaderModule::null(),
+            miss_shader_module: vk::ShaderModule::null(),
         }
     }
 
@@ -346,6 +352,10 @@ impl RayTracingApp {
             self.base
                 .device
                 .destroy_descriptor_set_layout(self.descriptor_set_layout, None);
+
+            self.base.device.destroy_shader_module(self.rgen_shader_module, None);
+            self.base.device.destroy_shader_module(self.chit_shader_module, None);
+            self.base.device.destroy_shader_module(self.miss_shader_module, None);
         }
     }
 
@@ -755,7 +765,7 @@ impl RayTracingApp {
 
             let rgen_code = read_spv(&mut rgen_spv_file).expect("Failed to read raygen spv file");
             let rgen_shader_info = vk::ShaderModuleCreateInfo::builder().code(&rgen_code);
-            let rgen_shader_module = self
+            self.rgen_shader_module = self
                 .base
                 .device
                 .create_shader_module(&rgen_shader_info, None)
@@ -763,7 +773,7 @@ impl RayTracingApp {
 
             let chit_code = read_spv(&mut chit_spv_file).expect("Failed to read chit spv file");
             let chit_shader_info = vk::ShaderModuleCreateInfo::builder().code(&chit_code);
-            let chit_shader_module = self
+            self.chit_shader_module = self
                 .base
                 .device
                 .create_shader_module(&chit_shader_info, None)
@@ -771,7 +781,7 @@ impl RayTracingApp {
 
             let miss_code = read_spv(&mut miss_spv_file).expect("Failed to read miss spv file");
             let miss_shader_info = vk::ShaderModuleCreateInfo::builder().code(&miss_code);
-            let miss_shader_module = self
+            self.miss_shader_module = self
                 .base
                 .device
                 .create_shader_module(&miss_shader_info, None)
@@ -807,17 +817,17 @@ impl RayTracingApp {
             let shader_stages = vec![
                 vk::PipelineShaderStageCreateInfo::builder()
                     .stage(vk::ShaderStageFlags::RAYGEN_NV)
-                    .module(rgen_shader_module)
+                    .module(self.rgen_shader_module)
                     .name(std::ffi::CStr::from_bytes_with_nul(b"main\0").unwrap())
                     .build(),
                 vk::PipelineShaderStageCreateInfo::builder()
                     .stage(vk::ShaderStageFlags::CLOSEST_HIT_NV)
-                    .module(chit_shader_module)
+                    .module(self.chit_shader_module)
                     .name(std::ffi::CStr::from_bytes_with_nul(b"main\0").unwrap())
                     .build(),
                 vk::PipelineShaderStageCreateInfo::builder()
                     .stage(vk::ShaderStageFlags::MISS_NV)
-                    .module(miss_shader_module)
+                    .module(self.miss_shader_module)
                     .name(std::ffi::CStr::from_bytes_with_nul(b"main\0").unwrap())
                     .build(),
             ];
