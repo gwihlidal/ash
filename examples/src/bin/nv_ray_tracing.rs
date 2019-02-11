@@ -50,22 +50,23 @@ impl GeometryInstance {
     }
 
     fn set_id(&mut self, id: u32) {
-        let id = (id & 0x00ffffff) << 8;
+        let id = id & 0x00ffffff;
         self.instance_id_and_mask |= id;
     }
 
     fn set_mask(&mut self, mask: u8) {
-        self.instance_id_and_mask |= mask as u32;
+        let mask = mask as u32;
+        self.instance_id_and_mask |= mask << 24;
     }
 
     fn set_offset(&mut self, offset: u32) {
-        let offset = (offset & 0x00ffffff) << 8;
+        let offset = offset & 0x00ffffff;
         self.instance_offset_and_flags |= offset;
     }
 
     fn set_flags(&mut self, flags: vk::GeometryInstanceFlagsNV) {
         let flags = flags.as_raw() as u32;
-        self.instance_offset_and_flags |= flags;
+        self.instance_offset_and_flags |= flags << 24;
     }
 }
 
