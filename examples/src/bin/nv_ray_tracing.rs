@@ -14,6 +14,7 @@ use std::mem::align_of;
 use std::path::Path;
 use std::rc::Rc;
 
+#[derive(Clone)]
 struct BufferResource {
     buffer: vk::Buffer,
     memory: vk::DeviceMemory,
@@ -102,7 +103,11 @@ impl Drop for BufferResource {
     }
 }
 
+#[derive(Clone)]
 struct RayTracingApp {
+    base: Rc<ExampleBase>,
+    ray_tracing: Rc<nv::RayTracing>,
+    properties: vk::PhysicalDeviceRayTracingPropertiesNV,
     top_as_memory: vk::DeviceMemory,
     top_as: vk::AccelerationStructureNV,
     bottom_as_memory: vk::DeviceMemory,
@@ -110,15 +115,34 @@ struct RayTracingApp {
     descriptor_set_layout: vk::DescriptorSetLayout,
     pipeline_layout: vk::PipelineLayout,
     pipeline: vk::Pipeline,
-    shader_binding_table: BufferResource,
+    shader_binding_table: Option<BufferResource>,
     descriptor_pool: vk::DescriptorPool,
     descriptor_set: vk::DescriptorSet,
-    base: Rc<ExampleBase>,
-    ray_tracing: Rc<nv::RayTracing>,
-    properties: vk::PhysicalDeviceRayTracingPropertiesNV,
 }
 
 impl RayTracingApp {
+    fn new(
+        base: Rc<ExampleBase>,
+        ray_tracing: Rc<nv::RayTracing>,
+        properties: vk::PhysicalDeviceRayTracingPropertiesNV,
+    ) -> Self {
+        RayTracingApp {
+            base,
+            ray_tracing,
+            properties,
+            top_as_memory: vk::DeviceMemory::null(),
+            top_as: vk::AccelerationStructureNV::null(),
+            bottom_as_memory: vk::DeviceMemory::null(),
+            bottom_as: vk::AccelerationStructureNV::null(),
+            descriptor_set_layout: vk::DescriptorSetLayout::null(),
+            pipeline_layout: vk::PipelineLayout::null(),
+            pipeline: vk::Pipeline::null(),
+            shader_binding_table: None,
+            descriptor_pool: vk::DescriptorPool::null(),
+            descriptor_set: vk::DescriptorSet::null(),
+        }
+    }
+
     fn initialize(&mut self) {
         self.create_acceleration_structures();
         self.create_pipeline();
@@ -128,25 +152,149 @@ impl RayTracingApp {
 
     fn release(&mut self) {
         unsafe {
-            self.ray_tracing.destroy_acceleration_structure(self.top_as, None);
+            self.base.device.device_wait_idle().unwrap();
+
+            self.ray_tracing
+                .destroy_acceleration_structure(self.top_as, None);
             self.base.device.free_memory(self.top_as_memory, None);
 
-            self.ray_tracing.destroy_acceleration_structure(self.bottom_as, None);
+            self.ray_tracing
+                .destroy_acceleration_structure(self.bottom_as, None);
             self.base.device.free_memory(self.bottom_as_memory, None);
 
-            self.base.device.destroy_descriptor_pool(self.descriptor_pool, None);
+            self.base
+                .device
+                .destroy_descriptor_pool(self.descriptor_pool, None);
 
-            //drop(self.shader_binding_table);
+            self.shader_binding_table = None;
 
             self.base.device.destroy_pipeline(self.pipeline, None);
-            self.base.device.destroy_pipeline_layout(self.pipeline_layout, None);
-            self.base.device.destroy_descriptor_set_layout(self.descriptor_set_layout, None);
+            self.base
+                .device
+                .destroy_pipeline_layout(self.pipeline_layout, None);
+            self.base
+                .device
+                .destroy_descriptor_set_layout(self.descriptor_set_layout, None);
         }
     }
 
     fn create_acceleration_structures(&mut self) {}
 
-    fn create_pipeline(&mut self) {}
+    fn create_pipeline(&mut self) {
+        unsafe {
+            let accel_binding = vk::DescriptorSetLayoutBinding::builder()
+                .descriptor_count(1)
+                .descriptor_type(vk::DescriptorType::ACCELERATION_STRUCTURE_NV)
+                .stage_flags(vk::ShaderStageFlags::RAYGEN_NV)
+                .build();
+
+            let output_binding = vk::DescriptorSetLayoutBinding::builder()
+                .descriptor_count(1)
+                .descriptor_type(vk::DescriptorType::STORAGE_IMAGE)
+                .stage_flags(vk::ShaderStageFlags::RAYGEN_NV)
+                .build();
+
+            let layout_info = vk::DescriptorSetLayoutCreateInfo::builder()
+                .bindings(&[accel_binding, output_binding])
+                .build();
+            self.base
+                .device
+                .create_descriptor_set_layout(&layout_info, None)
+                .unwrap();
+
+            //
+            let mut rgen_spv_file =
+                File::open(Path::new("shader/nv_ray_tracing/triangle.rgen.spv"))
+                    .expect("Could not find triangle.rgen.spv.");
+            let mut chit_spv_file =
+                File::open(Path::new("shader/nv_ray_tracing/triangle.chit.spv"))
+                    .expect("Could not find triangle.chit.spv.");
+            let mut miss_spv_file =
+                File::open(Path::new("shader/nv_ray_tracing/triangle.miss.spv"))
+                    .expect("Could not find triangle.miss.spv.");
+
+            let rgen_code = read_spv(&mut rgen_spv_file).expect("Failed to read raygen spv file");
+            let rgen_shader_info = vk::ShaderModuleCreateInfo::builder().code(&rgen_code);
+            let rgen_shader_module = self
+                .base
+                .device
+                .create_shader_module(&rgen_shader_info, None)
+                .expect("Raygen shader module error");
+
+            let chit_code = read_spv(&mut chit_spv_file).expect("Failed to read chit spv file");
+            let chit_shader_info = vk::ShaderModuleCreateInfo::builder().code(&chit_code);
+            let chit_shader_module = self
+                .base
+                .device
+                .create_shader_module(&chit_shader_info, None)
+                .expect("Closest-hit shader module error");
+
+            let miss_code = read_spv(&mut miss_spv_file).expect("Failed to read miss spv file");
+            let miss_shader_info = vk::ShaderModuleCreateInfo::builder().code(&miss_code);
+            let miss_shader_module = self
+                .base
+                .device
+                .create_shader_module(&miss_shader_info, None)
+                .expect("Miss shader module error");
+
+            let layouts = vec![self.descriptor_set_layout];
+            let layout_create_info = vk::PipelineLayoutCreateInfo::builder().set_layouts(&layouts);
+
+            self.pipeline_layout = self
+                .base
+                .device
+                .create_pipeline_layout(&layout_create_info, None)
+                .unwrap();
+
+            let shader_groups = vec![
+                // group0 = [ raygen ]
+                vk::RayTracingShaderGroupCreateInfoNV::builder()
+                    .ty(vk::RayTracingShaderGroupTypeNV::GENERAL)
+                    .general_shader(0)
+                    .build(),
+                // group1 = [ chit ]
+                vk::RayTracingShaderGroupCreateInfoNV::builder()
+                    .ty(vk::RayTracingShaderGroupTypeNV::TRIANGLES_HIT_GROUP)
+                    .closest_hit_shader(1)
+                    .build(),
+                // group2 = [ miss ]
+                vk::RayTracingShaderGroupCreateInfoNV::builder()
+                    .ty(vk::RayTracingShaderGroupTypeNV::GENERAL)
+                    .general_shader(2)
+                    .build(),
+            ];
+
+            let shader_stages = vec![
+                vk::PipelineShaderStageCreateInfo::builder()
+                    .stage(vk::ShaderStageFlags::RAYGEN_NV)
+                    .module(rgen_shader_module)
+                    .name(std::ffi::CStr::from_bytes_with_nul(b"main\0").unwrap())
+                    .build(),
+                vk::PipelineShaderStageCreateInfo::builder()
+                    .stage(vk::ShaderStageFlags::CLOSEST_HIT_NV)
+                    .module(chit_shader_module)
+                    .name(std::ffi::CStr::from_bytes_with_nul(b"main\0").unwrap())
+                    .build(),
+                vk::PipelineShaderStageCreateInfo::builder()
+                    .stage(vk::ShaderStageFlags::MISS_NV)
+                    .module(miss_shader_module)
+                    .name(std::ffi::CStr::from_bytes_with_nul(b"main\0").unwrap())
+                    .build(),
+            ];
+
+            let pipeline_info = vk::RayTracingPipelineCreateInfoNV::builder()
+                .stages(&shader_stages)
+                .groups(&shader_groups)
+                .max_recursion_depth(1)
+                .layout(self.pipeline_layout)
+                .build();
+
+            self.pipeline = self
+                .ray_tracing
+                .create_ray_tracing_pipelines(vk::PipelineCache::null(), &[pipeline_info], None)
+                .unwrap()[0];
+        }
+    }
 
     fn create_shader_binding_table(&mut self) {
         let group_count = 3; // Listed in vk::RayTracingPipelineCreateInfoNV
@@ -162,13 +310,14 @@ impl RayTracingApp {
                 )
                 .unwrap();
         }
-        self.shader_binding_table = BufferResource::new(
+        let mut shader_binding_table = BufferResource::new(
             table_size,
             vk::BufferUsageFlags::TRANSFER_SRC,
             vk::MemoryPropertyFlags::HOST_VISIBLE,
             self.base.clone(),
         );
-        self.shader_binding_table.store(&table_data);
+        shader_binding_table.store(&table_data);
+        self.shader_binding_table = Some(shader_binding_table);
     }
 
     fn create_descriptor_set(&mut self) {
@@ -217,7 +366,9 @@ impl RayTracingApp {
                 .next(&mut accel_info)
                 .build();
 
-            let image_info = vk::DescriptorImageInfo::builder().build(); //image_view(self.offscreen_image_view).image_layout(vk::ImageLayout::GENERAL).build(); // TODO
+            let image_info = vk::DescriptorImageInfo::builder()
+                .image_layout(vk::ImageLayout::GENERAL)
+                .build(); //image_view(self.offscreen_image_view) // TODO
             let image_write = vk::WriteDescriptorSet::builder()
                 .dst_set(self.descriptor_set)
                 .dst_binding(1)
@@ -232,51 +383,55 @@ impl RayTracingApp {
         }
     }
 
-    fn record_command_buffer(&mut self, command_buffer: vk::CommandBuffer) {
-        let handle_size = self.properties.shader_group_handle_size as u64;
-        // |[ raygen shader ]|[ hit shader  ]|[ miss shader ]|
-        // |                 |               |               |
-        // | 0               | 1             | 2             | 3
-        unsafe {
-            self.base.device.cmd_bind_pipeline(
-                command_buffer,
-                vk::PipelineBindPoint::RAY_TRACING_NV,
-                self.pipeline,
-            );
-            self.base.device.cmd_bind_descriptor_sets(
-                command_buffer,
-                vk::PipelineBindPoint::RAY_TRACING_NV,
-                self.pipeline_layout,
-                0,
-                &[self.descriptor_set],
-                &[],
-            );
-            self.ray_tracing.cmd_trace_rays(
-                command_buffer,
-                self.shader_binding_table.buffer,
-                0,
-                self.shader_binding_table.buffer,
-                2 * handle_size,
-                handle_size,
-                self.shader_binding_table.buffer,
-                1 * handle_size,
-                handle_size,
-                vk::Buffer::null(),
-                0,
-                0,
-                1920,
-                1080,
-                1,
-            )
+    fn record_command_buffer(&self, command_buffer: vk::CommandBuffer) {
+        if let Some(ref shader_binding_table) = self.shader_binding_table {
+            let handle_size = self.properties.shader_group_handle_size as u64;
+            // |[ raygen shader ]|[ hit shader  ]|[ miss shader ]|
+            // |                 |               |               |
+            // | 0               | 1             | 2             | 3
+            unsafe {
+                self.base.device.cmd_bind_pipeline(
+                    command_buffer,
+                    vk::PipelineBindPoint::RAY_TRACING_NV,
+                    self.pipeline,
+                );
+                self.base.device.cmd_bind_descriptor_sets(
+                    command_buffer,
+                    vk::PipelineBindPoint::RAY_TRACING_NV,
+                    self.pipeline_layout,
+                    0,
+                    &[self.descriptor_set],
+                    &[],
+                );
+                self.ray_tracing.cmd_trace_rays(
+                    command_buffer,
+                    shader_binding_table.buffer,
+                    0,
+                    shader_binding_table.buffer,
+                    2 * handle_size,
+                    handle_size,
+                    shader_binding_table.buffer,
+                    1 * handle_size,
+                    handle_size,
+                    vk::Buffer::null(),
+                    0,
+                    0,
+                    1920,
+                    1080,
+                    1,
+                )
+            }
         }
     }
 }
 
 fn main() {
     unsafe {
-        let base = ExampleBase::new(1920, 1080, true);
+        let base = Rc::new(ExampleBase::new(1920, 1080, true));
         let props_rt = nv::RayTracing::get_properties(&base.instance, base.pdevice);
-        let ray_tracing = nv::RayTracing::new(&base.instance, &base.device);
+        let ray_tracing = Rc::new(nv::RayTracing::new(&base.instance, &base.device));
+        let mut app = RayTracingApp::new(base.clone(), ray_tracing, props_rt);
+        app.initialize();
 
         println!("NV Ray Tracing Properties:");
         println!(
@@ -300,8 +455,6 @@ fn main() {
             props_rt.max_descriptor_set_acceleration_structures
         );
 
-        return;
-
         base.render_loop(|| {
             let (present_index, _) = base
                 .swapchain_loader
@@ -320,8 +473,8 @@ fn main() {
                 &[vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT],
                 &[base.present_complete_semaphore],
                 &[base.rendering_complete_semaphore],
-                |device, draw_command_buffer| {
-                    //
+                |_device, command_buffer| {
+                    app.record_command_buffer(command_buffer);
                 },
             );
 
@@ -339,21 +492,6 @@ fn main() {
         });
 
         base.device.device_wait_idle().unwrap();
-        /*for pipeline in graphics_pipelines {
-            base.device.destroy_pipeline(pipeline, None);
-        }
-        base.device.destroy_pipeline_layout(pipeline_layout, None);
-        base.device
-            .destroy_shader_module(vertex_shader_module, None);
-        base.device
-            .destroy_shader_module(fragment_shader_module, None);
-        base.device.free_memory(index_buffer_memory, None);
-        base.device.destroy_buffer(index_buffer, None);
-        base.device.free_memory(vertex_input_buffer_memory, None);
-        base.device.destroy_buffer(vertex_input_buffer, None);
-        for framebuffer in framebuffers {
-            base.device.destroy_framebuffer(framebuffer, None);
-        }
-        base.device.destroy_render_pass(renderpass, None);*/
+        app.release();
     }
 }
