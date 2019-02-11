@@ -126,6 +126,24 @@ impl RayTracingApp {
         self.create_descriptor_set();
     }
 
+    fn release(&mut self) {
+        unsafe {
+            self.ray_tracing.destroy_acceleration_structure(self.top_as, None);
+            self.base.device.free_memory(self.top_as_memory, None);
+
+            self.ray_tracing.destroy_acceleration_structure(self.bottom_as, None);
+            self.base.device.free_memory(self.bottom_as_memory, None);
+
+            self.base.device.destroy_descriptor_pool(self.descriptor_pool, None);
+
+            //drop(self.shader_binding_table);
+
+            self.base.device.destroy_pipeline(self.pipeline, None);
+            self.base.device.destroy_pipeline_layout(self.pipeline_layout, None);
+            self.base.device.destroy_descriptor_set_layout(self.descriptor_set_layout, None);
+        }
+    }
+
     fn create_acceleration_structures(&mut self) {}
 
     fn create_pipeline(&mut self) {}
