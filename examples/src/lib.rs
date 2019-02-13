@@ -227,6 +227,7 @@ unsafe extern "system" fn vulkan_debug_callback(
     _: *mut c_void,
 ) -> u32 {
     println!("{:?}", CStr::from_ptr(p_message));
+    ///panic!("BLAH2");
     vk::FALSE
 }
 

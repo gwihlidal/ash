@@ -735,6 +735,8 @@ impl RayTracingApp {
                 .binding(0)
                 .build();
 
+            println!("accel_binding: {:?}", accel_binding);
+
             let output_binding = vk::DescriptorSetLayoutBinding::builder()
                 .descriptor_count(1)
                 .descriptor_type(vk::DescriptorType::STORAGE_IMAGE)
@@ -872,11 +874,11 @@ impl RayTracingApp {
         unsafe {
             let descriptor_sizes = [
                 vk::DescriptorPoolSize {
-                    ty: vk::DescriptorType::STORAGE_IMAGE,
+                    ty: vk::DescriptorType::ACCELERATION_STRUCTURE_NV,
                     descriptor_count: 1,
                 },
                 vk::DescriptorPoolSize {
-                    ty: vk::DescriptorType::ACCELERATION_STRUCTURE_NV,
+                    ty: vk::DescriptorType::STORAGE_IMAGE,
                     descriptor_count: 1,
                 },
             ];
@@ -917,6 +919,8 @@ impl RayTracingApp {
 
             // This is only set by the builder for images, buffers, or views; need to set explicitly after
             accel_write.descriptor_count = 1;
+
+            println!("accel_write: {:?}", accel_write);
 
             let image_info = vk::DescriptorImageInfo::builder()
                 .image_layout(vk::ImageLayout::GENERAL)
