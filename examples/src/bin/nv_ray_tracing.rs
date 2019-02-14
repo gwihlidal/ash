@@ -662,10 +662,8 @@ impl RayTracingApp {
 
             self.base.device.cmd_pipeline_barrier(
                 build_command_buffer,
-                //vk::PipelineStageFlags::ACCELERATION_STRUCTURE_BUILD_NV,
-                //vk::PipelineStageFlags::ACCELERATION_STRUCTURE_BUILD_NV,
-                vk::PipelineStageFlags::RAY_TRACING_SHADER_NV,
-                vk::PipelineStageFlags::RAY_TRACING_SHADER_NV,
+                vk::PipelineStageFlags::ACCELERATION_STRUCTURE_BUILD_NV,
+                vk::PipelineStageFlags::ACCELERATION_STRUCTURE_BUILD_NV,
                 vk::DependencyFlags::empty(),
                 &[memory_barrier],
                 &[],
@@ -689,9 +687,8 @@ impl RayTracingApp {
 
             self.base.device.cmd_pipeline_barrier(
                 build_command_buffer,
-                //vk::PipelineStageFlags::ACCELERATION_STRUCTURE_BUILD_NV,
-                vk::PipelineStageFlags::RAY_TRACING_SHADER_NV,
-                vk::PipelineStageFlags::RAY_TRACING_SHADER_NV,
+                vk::PipelineStageFlags::ACCELERATION_STRUCTURE_BUILD_NV,
+                vk::PipelineStageFlags::ACCELERATION_STRUCTURE_BUILD_NV,
                 vk::DependencyFlags::empty(),
                 &[memory_barrier],
                 &[],
