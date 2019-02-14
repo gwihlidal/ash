@@ -706,13 +706,15 @@ impl RayTracingApp {
                 .end_command_buffer(build_command_buffer)
                 .unwrap();
 
-            let submit_info = vk::SubmitInfo::builder()
-                .command_buffers(&[build_command_buffer])
-                .build();
-
             self.base
                 .device
-                .queue_submit(self.base.present_queue, &[submit_info], vk::Fence::null())
+                .queue_submit(
+                    self.base.present_queue,
+                    &[vk::SubmitInfo::builder()
+                        .command_buffers(&[build_command_buffer])
+                        .build()],
+                    vk::Fence::null(),
+                )
                 .expect("queue submit failed.");
 
             match self.base.device.queue_wait_idle(self.base.present_queue) {
@@ -731,32 +733,30 @@ impl RayTracingApp {
 
     fn create_pipeline(&mut self) {
         unsafe {
-            let accel_binding = vk::DescriptorSetLayoutBinding::builder()
-                .descriptor_count(1)
-                .descriptor_type(vk::DescriptorType::ACCELERATION_STRUCTURE_NV)
-                .stage_flags(vk::ShaderStageFlags::RAYGEN_NV)
-                .binding(0)
-                .build();
-
-            println!("accel_binding: {:?}", accel_binding);
-
-            let output_binding = vk::DescriptorSetLayoutBinding::builder()
-                .descriptor_count(1)
-                .descriptor_type(vk::DescriptorType::STORAGE_IMAGE)
-                .stage_flags(vk::ShaderStageFlags::RAYGEN_NV)
-                .binding(1)
-                .build();
-
-            let layout_info = vk::DescriptorSetLayoutCreateInfo::builder()
-                .bindings(&[accel_binding, output_binding])
-                .build();
             self.descriptor_set_layout = self
                 .base
                 .device
-                .create_descriptor_set_layout(&layout_info, None)
+                .create_descriptor_set_layout(
+                    &vk::DescriptorSetLayoutCreateInfo::builder()
+                        .bindings(&[
+                            vk::DescriptorSetLayoutBinding::builder()
+                                .descriptor_count(1)
+                                .descriptor_type(vk::DescriptorType::ACCELERATION_STRUCTURE_NV)
+                                .stage_flags(vk::ShaderStageFlags::RAYGEN_NV)
+                                .binding(0)
+                                .build(),
+                            vk::DescriptorSetLayoutBinding::builder()
+                                .descriptor_count(1)
+                                .descriptor_type(vk::DescriptorType::STORAGE_IMAGE)
+                                .stage_flags(vk::ShaderStageFlags::RAYGEN_NV)
+                                .binding(1)
+                                .build(),
+                        ])
+                        .build(),
+                    None,
+                )
                 .unwrap();
 
-            //
             let mut rgen_spv_file =
                 File::open(Path::new("shader/nv_ray_tracing/triangle.rgen.spv"))
                     .expect("Could not find triangle.rgen.spv.");
@@ -836,16 +836,18 @@ impl RayTracingApp {
                     .build(),
             ];
 
-            let pipeline_info = vk::RayTracingPipelineCreateInfoNV::builder()
-                .stages(&shader_stages)
-                .groups(&shader_groups)
-                .max_recursion_depth(1)
-                .layout(self.pipeline_layout)
-                .build();
-
             self.pipeline = self
                 .ray_tracing
-                .create_ray_tracing_pipelines(vk::PipelineCache::null(), &[pipeline_info], None)
+                .create_ray_tracing_pipelines(
+                    vk::PipelineCache::null(),
+                    &[vk::RayTracingPipelineCreateInfoNV::builder()
+                        .stages(&shader_stages)
+                        .groups(&shader_groups)
+                        .max_recursion_depth(1)
+                        .layout(self.pipeline_layout)
+                        .build()],
+                    None,
+                )
                 .unwrap()[0];
         }
     }
@@ -897,20 +899,21 @@ impl RayTracingApp {
                 .create_descriptor_pool(&descriptor_pool_info, None)
                 .unwrap();
 
-            let layouts = vec![self.descriptor_set_layout];
-            let alloc_info = vk::DescriptorSetAllocateInfo::builder()
-                .descriptor_pool(self.descriptor_pool)
-                .set_layouts(&layouts);
-
             let descriptor_sets = self
                 .base
                 .device
-                .allocate_descriptor_sets(&alloc_info)
+                .allocate_descriptor_sets(
+                    &vk::DescriptorSetAllocateInfo::builder()
+                        .descriptor_pool(self.descriptor_pool)
+                        .set_layouts(&[self.descriptor_set_layout])
+                        .build(),
+                )
                 .unwrap();
             self.descriptor_set = descriptor_sets[0];
 
+            let accel_structs = [self.top_as];
             let mut accel_info = vk::WriteDescriptorSetAccelerationStructureNV::builder()
-                .acceleration_structures(&[self.top_as])
+                .acceleration_structures(&accel_structs)
                 .build();
 
             let mut accel_write = vk::WriteDescriptorSet::builder()
@@ -923,8 +926,6 @@ impl RayTracingApp {
 
             // This is only set by the builder for images, buffers, or views; need to set explicitly after
             accel_write.descriptor_count = 1;
-
-            println!("accel_write: {:?}", accel_write);
 
             let image_info = vk::DescriptorImageInfo::builder()
                 .image_layout(vk::ImageLayout::GENERAL)
