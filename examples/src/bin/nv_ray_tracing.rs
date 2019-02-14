@@ -764,15 +764,15 @@ impl RayTracingApp {
                 )
                 .unwrap();
 
+            let use_lib = false;
             let use_hlsl = true;
+            if use_lib && use_hlsl {
+                let lib_path = Path::new("examples/shader/nv_ray_tracing/triangle.hlsl_lib.spv");
+                let mut lib_file = File::open(lib_path)
+                    .expect(&format!("Could not open lib file: {:?}", lib_path));
 
-            if use_hlsl {
-                let mut lib_spv_file =
-                    File::open(Path::new("examples/shader/nv_ray_tracing/triangle.lib.spv"))
-                        .expect("Could not find triangle.lib.spv.");
-
-                let lib_code =
-                    read_spv(&mut lib_spv_file).expect("Failed to read library spv file");
+                let lib_code = read_spv(&mut lib_file)
+                    .expect(&format!("Could not load lib file: {:?}", lib_path));
                 let lib_shader_info = vk::ShaderModuleCreateInfo::builder().code(&lib_code);
                 self.lib_shader_module = self
                     .base
@@ -780,43 +780,53 @@ impl RayTracingApp {
                     .create_shader_module(&lib_shader_info, None)
                     .expect("Library shader module error");
             } else {
-                let mut rgen_spv_file = File::open(Path::new(
-                    "examples/shader/nv_ray_tracing/triangle.rgen.spv",
-                ))
-                .expect("Could not find triangle.rgen.spv.");
-                let mut chit_spv_file = File::open(Path::new(
-                    "examples/shader/nv_ray_tracing/triangle.rchit.spv",
-                ))
-                .expect("Could not find triangle.rchit.spv.");
-                let mut miss_spv_file = File::open(Path::new(
-                    "examples/shader/nv_ray_tracing/triangle.rmiss.spv",
-                ))
-                .expect("Could not find triangle.rmiss.spv.");
+                let (rgen_path, rchit_path, rmiss_path) = if use_hlsl {
+                    (
+                        Path::new("examples/shader/nv_ray_tracing/triangle.hlsl_rgen.spv"),
+                        Path::new("examples/shader/nv_ray_tracing/triangle.hlsl_rchit.spv"),
+                        Path::new("examples/shader/nv_ray_tracing/triangle.hlsl_rmiss.spv"),
+                    )
+                } else {
+                    (
+                        Path::new("examples/shader/nv_ray_tracing/triangle.glsl_rgen.spv"),
+                        Path::new("examples/shader/nv_ray_tracing/triangle.glsl_rchit.spv"),
+                        Path::new("examples/shader/nv_ray_tracing/triangle.glsl_rmiss.spv"),
+                    )
+                };
 
-                let rgen_code =
-                    read_spv(&mut rgen_spv_file).expect("Failed to read raygen spv file");
+                let mut rgen_file = File::open(&rgen_path)
+                    .expect(&format!("Could not open rgen file: {:?}", rgen_path));
+                let mut rchit_file = File::open(&rchit_path)
+                    .expect(&format!("Could not open rchit file: {:?}", rchit_path));
+                let mut rmiss_file = File::open(&rmiss_path)
+                    .expect(&format!("Could not open rmiss file: {:?}", rmiss_path));
+
+                let rgen_code = read_spv(&mut rgen_file)
+                    .expect(&format!("Could not load rgen file: {:?}", rgen_path));
                 let rgen_shader_info = vk::ShaderModuleCreateInfo::builder().code(&rgen_code);
                 self.rgen_shader_module = self
                     .base
                     .device
                     .create_shader_module(&rgen_shader_info, None)
-                    .expect("Raygen shader module error");
+                    .expect("Failed to create rgen shader module");
 
-                let chit_code = read_spv(&mut chit_spv_file).expect("Failed to read chit spv file");
-                let chit_shader_info = vk::ShaderModuleCreateInfo::builder().code(&chit_code);
+                let rchit_code = read_spv(&mut rchit_file)
+                    .expect(&format!("Could not load rchit file: {:?}", rchit_file));
+                let rchit_shader_info = vk::ShaderModuleCreateInfo::builder().code(&rchit_code);
                 self.chit_shader_module = self
                     .base
                     .device
-                    .create_shader_module(&chit_shader_info, None)
-                    .expect("Closest-hit shader module error");
+                    .create_shader_module(&rchit_shader_info, None)
+                    .expect("Failed to create rchit shader module");
 
-                let miss_code = read_spv(&mut miss_spv_file).expect("Failed to read miss spv file");
-                let miss_shader_info = vk::ShaderModuleCreateInfo::builder().code(&miss_code);
+                let rmiss_code = read_spv(&mut rmiss_file)
+                    .expect(&format!("Could not load rmiss file: {:?}", rmiss_file));
+                let rmiss_shader_info = vk::ShaderModuleCreateInfo::builder().code(&rmiss_code);
                 self.miss_shader_module = self
                     .base
                     .device
-                    .create_shader_module(&miss_shader_info, None)
-                    .expect("Miss shader module error");
+                    .create_shader_module(&rmiss_shader_info, None)
+                    .expect("Failed to create rmiss shader module");
             }
 
             let layouts = vec![self.descriptor_set_layout];
@@ -855,7 +865,7 @@ impl RayTracingApp {
                     .build(),
             ];
 
-            let shader_stages = if use_hlsl {
+            let shader_stages = if use_lib && use_hlsl {
                 vec![
                     vk::PipelineShaderStageCreateInfo::builder()
                         .stage(vk::ShaderStageFlags::RAYGEN_NV)
