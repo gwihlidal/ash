@@ -450,6 +450,7 @@ impl RayTracingApp {
                         )
                         .build(),
                 )
+                .flags(vk::GeometryFlagsNV::OPAQUE)
                 .build()];
 
             // Create bottom-level acceleration structure
@@ -460,6 +461,7 @@ impl RayTracingApp {
                     vk::AccelerationStructureInfoNV::builder()
                         .ty(vk::AccelerationStructureTypeNV::BOTTOM_LEVEL)
                         .geometries(&geometry)
+                        .flags(vk::BuildAccelerationStructureFlagsNV::PREFER_FAST_TRACE)
                         .build(),
                 )
                 .build();
