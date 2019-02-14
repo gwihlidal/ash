@@ -287,6 +287,7 @@ struct RayTracingApp {
     rgen_shader_module: vk::ShaderModule,
     chit_shader_module: vk::ShaderModule,
     miss_shader_module: vk::ShaderModule,
+    lib_shader_module: vk::ShaderModule,
 }
 
 impl RayTracingApp {
@@ -313,6 +314,7 @@ impl RayTracingApp {
             rgen_shader_module: vk::ShaderModule::null(),
             chit_shader_module: vk::ShaderModule::null(),
             miss_shader_module: vk::ShaderModule::null(),
+            lib_shader_module: vk::ShaderModule::null(),
         }
     }
 
@@ -359,6 +361,9 @@ impl RayTracingApp {
             self.base
                 .device
                 .destroy_shader_module(self.miss_shader_module, None);
+            self.base
+                .device
+                .destroy_shader_module(self.lib_shader_module, None);
         }
     }
 
@@ -762,39 +767,60 @@ impl RayTracingApp {
                 )
                 .unwrap();
 
-            let mut rgen_spv_file =
-                File::open(Path::new("examples/shader/nv_ray_tracing/triangle.rgen.spv"))
-                    .expect("Could not find triangle.rgen.spv.");
-            let mut chit_spv_file =
-                File::open(Path::new("examples/shader/nv_ray_tracing/triangle.rchit.spv"))
-                    .expect("Could not find triangle.rchit.spv.");
-            let mut miss_spv_file =
-                File::open(Path::new("examples/shader/nv_ray_tracing/triangle.rmiss.spv"))
-                    .expect("Could not find triangle.rmiss.spv.");
+            let use_hlsl = false;
 
-            let rgen_code = read_spv(&mut rgen_spv_file).expect("Failed to read raygen spv file");
-            let rgen_shader_info = vk::ShaderModuleCreateInfo::builder().code(&rgen_code);
-            self.rgen_shader_module = self
-                .base
-                .device
-                .create_shader_module(&rgen_shader_info, None)
-                .expect("Raygen shader module error");
+            if use_hlsl {
+                let mut lib_spv_file =
+                    File::open(Path::new("examples/shader/nv_ray_tracing/triangle.lib.spv"))
+                        .expect("Could not find triangle.lib.spv.");
 
-            let chit_code = read_spv(&mut chit_spv_file).expect("Failed to read chit spv file");
-            let chit_shader_info = vk::ShaderModuleCreateInfo::builder().code(&chit_code);
-            self.chit_shader_module = self
-                .base
-                .device
-                .create_shader_module(&chit_shader_info, None)
-                .expect("Closest-hit shader module error");
+                let lib_code =
+                    read_spv(&mut lib_spv_file).expect("Failed to read library spv file");
+                let lib_shader_info = vk::ShaderModuleCreateInfo::builder().code(&lib_code);
+                self.lib_shader_module = self
+                    .base
+                    .device
+                    .create_shader_module(&lib_shader_info, None)
+                    .expect("Library shader module error");
+            } else {
+                let mut rgen_spv_file = File::open(Path::new(
+                    "examples/shader/nv_ray_tracing/triangle.rgen.spv",
+                ))
+                .expect("Could not find triangle.rgen.spv.");
+                let mut chit_spv_file = File::open(Path::new(
+                    "examples/shader/nv_ray_tracing/triangle.rchit.spv",
+                ))
+                .expect("Could not find triangle.rchit.spv.");
+                let mut miss_spv_file = File::open(Path::new(
+                    "examples/shader/nv_ray_tracing/triangle.rmiss.spv",
+                ))
+                .expect("Could not find triangle.rmiss.spv.");
 
-            let miss_code = read_spv(&mut miss_spv_file).expect("Failed to read miss spv file");
-            let miss_shader_info = vk::ShaderModuleCreateInfo::builder().code(&miss_code);
-            self.miss_shader_module = self
-                .base
-                .device
-                .create_shader_module(&miss_shader_info, None)
-                .expect("Miss shader module error");
+                let rgen_code =
+                    read_spv(&mut rgen_spv_file).expect("Failed to read raygen spv file");
+                let rgen_shader_info = vk::ShaderModuleCreateInfo::builder().code(&rgen_code);
+                self.rgen_shader_module = self
+                    .base
+                    .device
+                    .create_shader_module(&rgen_shader_info, None)
+                    .expect("Raygen shader module error");
+
+                let chit_code = read_spv(&mut chit_spv_file).expect("Failed to read chit spv file");
+                let chit_shader_info = vk::ShaderModuleCreateInfo::builder().code(&chit_code);
+                self.chit_shader_module = self
+                    .base
+                    .device
+                    .create_shader_module(&chit_shader_info, None)
+                    .expect("Closest-hit shader module error");
+
+                let miss_code = read_spv(&mut miss_spv_file).expect("Failed to read miss spv file");
+                let miss_shader_info = vk::ShaderModuleCreateInfo::builder().code(&miss_code);
+                self.miss_shader_module = self
+                    .base
+                    .device
+                    .create_shader_module(&miss_shader_info, None)
+                    .expect("Miss shader module error");
+            }
 
             let layouts = vec![self.descriptor_set_layout];
             let layout_create_info = vk::PipelineLayoutCreateInfo::builder().set_layouts(&layouts);
@@ -832,23 +858,43 @@ impl RayTracingApp {
                     .build(),
             ];
 
-            let shader_stages = vec![
-                vk::PipelineShaderStageCreateInfo::builder()
-                    .stage(vk::ShaderStageFlags::RAYGEN_NV)
-                    .module(self.rgen_shader_module)
-                    .name(std::ffi::CStr::from_bytes_with_nul(b"main\0").unwrap())
-                    .build(),
-                vk::PipelineShaderStageCreateInfo::builder()
-                    .stage(vk::ShaderStageFlags::CLOSEST_HIT_NV)
-                    .module(self.chit_shader_module)
-                    .name(std::ffi::CStr::from_bytes_with_nul(b"main\0").unwrap())
-                    .build(),
-                vk::PipelineShaderStageCreateInfo::builder()
-                    .stage(vk::ShaderStageFlags::MISS_NV)
-                    .module(self.miss_shader_module)
-                    .name(std::ffi::CStr::from_bytes_with_nul(b"main\0").unwrap())
-                    .build(),
-            ];
+            let shader_stages = if use_hlsl {
+                vec![
+                    vk::PipelineShaderStageCreateInfo::builder()
+                        .stage(vk::ShaderStageFlags::RAYGEN_NV)
+                        .module(self.rgen_shader_module)
+                        .name(std::ffi::CStr::from_bytes_with_nul(b"main\0").unwrap())
+                        .build(),
+                    vk::PipelineShaderStageCreateInfo::builder()
+                        .stage(vk::ShaderStageFlags::CLOSEST_HIT_NV)
+                        .module(self.chit_shader_module)
+                        .name(std::ffi::CStr::from_bytes_with_nul(b"main\0").unwrap())
+                        .build(),
+                    vk::PipelineShaderStageCreateInfo::builder()
+                        .stage(vk::ShaderStageFlags::MISS_NV)
+                        .module(self.miss_shader_module)
+                        .name(std::ffi::CStr::from_bytes_with_nul(b"main\0").unwrap())
+                        .build(),
+                ]
+            } else {
+                vec![
+                    vk::PipelineShaderStageCreateInfo::builder()
+                        .stage(vk::ShaderStageFlags::RAYGEN_NV)
+                        .module(self.lib_shader_module)
+                        .name(std::ffi::CStr::from_bytes_with_nul(b"rgen_main\0").unwrap())
+                        .build(),
+                    vk::PipelineShaderStageCreateInfo::builder()
+                        .stage(vk::ShaderStageFlags::CLOSEST_HIT_NV)
+                        .module(self.lib_shader_module)
+                        .name(std::ffi::CStr::from_bytes_with_nul(b"rchit_main\0").unwrap())
+                        .build(),
+                    vk::PipelineShaderStageCreateInfo::builder()
+                        .stage(vk::ShaderStageFlags::MISS_NV)
+                        .module(self.lib_shader_module)
+                        .name(std::ffi::CStr::from_bytes_with_nul(b"rmiss_main\0").unwrap())
+                        .build(),
+                ]
+            };
 
             self.pipeline = self
                 .ray_tracing
