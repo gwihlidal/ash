@@ -3,13 +3,10 @@ extern crate examples;
 
 use ash::extensions::nv;
 use ash::util::*;
-//use ash::version::InstanceV1_1;
 use ash::vk;
 use examples::*;
 use std::default::Default;
-//use std::ffi::CString;
 use std::fs::File;
-//use std::mem;
 use std::mem::align_of;
 use std::path::Path;
 use std::rc::Rc;
@@ -758,13 +755,13 @@ impl RayTracingApp {
                 .unwrap();
 
             let mut rgen_spv_file =
-                File::open(Path::new("shader/nv_ray_tracing/triangle.rgen.spv"))
+                File::open(Path::new("examples/shader/nv_ray_tracing/triangle.rgen.spv"))
                     .expect("Could not find triangle.rgen.spv.");
             let mut chit_spv_file =
-                File::open(Path::new("shader/nv_ray_tracing/triangle.rchit.spv"))
+                File::open(Path::new("examples/shader/nv_ray_tracing/triangle.rchit.spv"))
                     .expect("Could not find triangle.rchit.spv.");
             let mut miss_spv_file =
-                File::open(Path::new("shader/nv_ray_tracing/triangle.rmiss.spv"))
+                File::open(Path::new("examples/shader/nv_ray_tracing/triangle.rmiss.spv"))
                     .expect("Could not find triangle.rmiss.spv.");
 
             let rgen_code = read_spv(&mut rgen_spv_file).expect("Failed to read raygen spv file");
