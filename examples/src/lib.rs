@@ -29,9 +29,6 @@ use ash::extensions::{
     khr::{Surface, Swapchain},
 };
 
-#[cfg(target_os = "windows")]
-use ash::extensions::nv::RayTracing;
-#[cfg(all(unix, not(target_os = "android"), not(target_os = "macos")))]
 use ash::extensions::nv::RayTracing;
 
 #[cfg(target_os = "windows")]
