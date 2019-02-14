@@ -11,11 +11,13 @@ use std::mem::align_of;
 use std::path::Path;
 use std::rc::Rc;
 
+#[repr(C)]
 #[derive(Clone, Debug, Copy)]
 struct Vertex {
     pos: [f32; 3],
 }
 
+#[repr(C)]
 #[derive(Clone, Debug, Copy)]
 struct GeometryInstance {
     transform: [f32; 12],
