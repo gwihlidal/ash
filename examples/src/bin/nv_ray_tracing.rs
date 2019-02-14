@@ -351,9 +351,15 @@ impl RayTracingApp {
                 .device
                 .destroy_descriptor_set_layout(self.descriptor_set_layout, None);
 
-            self.base.device.destroy_shader_module(self.rgen_shader_module, None);
-            self.base.device.destroy_shader_module(self.chit_shader_module, None);
-            self.base.device.destroy_shader_module(self.miss_shader_module, None);
+            self.base
+                .device
+                .destroy_shader_module(self.rgen_shader_module, None);
+            self.base
+                .device
+                .destroy_shader_module(self.chit_shader_module, None);
+            self.base
+                .device
+                .destroy_shader_module(self.miss_shader_module, None);
         }
     }
 
@@ -744,7 +750,8 @@ impl RayTracingApp {
             let layout_info = vk::DescriptorSetLayoutCreateInfo::builder()
                 .bindings(&[accel_binding, output_binding])
                 .build();
-            self.descriptor_set_layout = self.base
+            self.descriptor_set_layout = self
+                .base
                 .device
                 .create_descriptor_set_layout(&layout_info, None)
                 .unwrap();

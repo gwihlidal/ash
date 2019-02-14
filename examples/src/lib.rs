@@ -25,11 +25,8 @@ use std::mem;
 #[cfg(all(unix, not(target_os = "android"), not(target_os = "macos")))]
 use ash::extensions::khr::XlibSurface;
 use ash::extensions::{
-    ext::{DebugReport, DescriptorIndexing},
-    khr::{
-        maintenance1_name, maintenance2_name, maintenance3_name, memory_requirements2_name,
-        physical_device_properties2_name, Surface, Swapchain,
-    },
+    ext::DebugReport,
+    khr::{Surface, Swapchain},
 };
 
 #[cfg(target_os = "windows")]
@@ -212,7 +209,7 @@ fn extension_names() -> Vec<*const i8> {
         Surface::name().as_ptr(),
         Win32Surface::name().as_ptr(),
         DebugReport::name().as_ptr(),
-        physical_device_properties2_name().as_ptr(),
+        vk::KhrGetPhysicalDeviceProperties2Fn::name().as_ptr(),
     ]
 }
 
@@ -412,8 +409,8 @@ impl ExampleBase {
                 vec![
                     Swapchain::name().as_ptr(),
                     RayTracing::name().as_ptr(),
-                    DescriptorIndexing::name().as_ptr(),
-                    memory_requirements2_name().as_ptr(),
+                    vk::ExtDescriptorIndexingFn::name().as_ptr(),
+                    vk::KhrGetMemoryRequirements2Fn::name().as_ptr(),
                 ]
             } else {
                 vec![Swapchain::name().as_ptr()]
@@ -514,7 +511,9 @@ impl ExampleBase {
                 .image_color_space(surface_format.color_space)
                 .image_format(surface_format.format)
                 .image_extent(surface_resolution.clone())
-                .image_usage(vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::TRANSFER_DST)
+                .image_usage(
+                    vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::TRANSFER_DST,
+                )
                 .image_sharing_mode(vk::SharingMode::EXCLUSIVE)
                 .pre_transform(pre_transform)
                 .composite_alpha(vk::CompositeAlphaFlagsKHR::OPAQUE)
