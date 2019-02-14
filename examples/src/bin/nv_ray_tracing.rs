@@ -862,24 +862,6 @@ impl RayTracingApp {
                 vec![
                     vk::PipelineShaderStageCreateInfo::builder()
                         .stage(vk::ShaderStageFlags::RAYGEN_NV)
-                        .module(self.rgen_shader_module)
-                        .name(std::ffi::CStr::from_bytes_with_nul(b"main\0").unwrap())
-                        .build(),
-                    vk::PipelineShaderStageCreateInfo::builder()
-                        .stage(vk::ShaderStageFlags::CLOSEST_HIT_NV)
-                        .module(self.chit_shader_module)
-                        .name(std::ffi::CStr::from_bytes_with_nul(b"main\0").unwrap())
-                        .build(),
-                    vk::PipelineShaderStageCreateInfo::builder()
-                        .stage(vk::ShaderStageFlags::MISS_NV)
-                        .module(self.miss_shader_module)
-                        .name(std::ffi::CStr::from_bytes_with_nul(b"main\0").unwrap())
-                        .build(),
-                ]
-            } else {
-                vec![
-                    vk::PipelineShaderStageCreateInfo::builder()
-                        .stage(vk::ShaderStageFlags::RAYGEN_NV)
                         .module(self.lib_shader_module)
                         .name(std::ffi::CStr::from_bytes_with_nul(b"rgen_main\0").unwrap())
                         .build(),
@@ -892,6 +874,24 @@ impl RayTracingApp {
                         .stage(vk::ShaderStageFlags::MISS_NV)
                         .module(self.lib_shader_module)
                         .name(std::ffi::CStr::from_bytes_with_nul(b"rmiss_main\0").unwrap())
+                        .build(),
+                ]
+            } else {
+                vec![
+                    vk::PipelineShaderStageCreateInfo::builder()
+                        .stage(vk::ShaderStageFlags::RAYGEN_NV)
+                        .module(self.rgen_shader_module)
+                        .name(std::ffi::CStr::from_bytes_with_nul(b"main\0").unwrap())
+                        .build(),
+                    vk::PipelineShaderStageCreateInfo::builder()
+                        .stage(vk::ShaderStageFlags::CLOSEST_HIT_NV)
+                        .module(self.chit_shader_module)
+                        .name(std::ffi::CStr::from_bytes_with_nul(b"main\0").unwrap())
+                        .build(),
+                    vk::PipelineShaderStageCreateInfo::builder()
+                        .stage(vk::ShaderStageFlags::MISS_NV)
+                        .module(self.miss_shader_module)
+                        .name(std::ffi::CStr::from_bytes_with_nul(b"main\0").unwrap())
                         .build(),
                 ]
             };
