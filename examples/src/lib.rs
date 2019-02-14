@@ -59,7 +59,7 @@ macro_rules! offset_of {
     }};
 }
 
-pub fn record_submit_commandbuffer<D: DeviceV1_1, F: FnOnce(&D, vk::CommandBuffer)>(
+pub fn record_submit_commandbuffer<D: DeviceV1_0, F: FnOnce(&D, vk::CommandBuffer)>(
     device: &D,
     command_buffer: vk::CommandBuffer,
     submit_queue: vk::Queue,
