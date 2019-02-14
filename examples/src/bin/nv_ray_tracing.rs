@@ -400,15 +400,12 @@ impl RayTracingApp {
 
             let vertices = [
                 Vertex {
-                    //pos: [-1.0, 1.0, 0.0],
                     pos: [-0.5, -0.5, 0.0],
                 },
                 Vertex {
-                    //pos: [1.0, 1.0, 0.0],
                     pos: [0.0, 0.5, 0.0],
                 },
                 Vertex {
-                    //pos: [0.0, -1.0, 0.0],
                     pos: [0.5, -0.5, 0.0],
                 },
             ];
@@ -767,7 +764,7 @@ impl RayTracingApp {
                 )
                 .unwrap();
 
-            let use_hlsl = false;
+            let use_hlsl = true;
 
             if use_hlsl {
                 let mut lib_spv_file =

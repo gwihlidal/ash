@@ -16,12 +16,17 @@ void rgen_main()
 {
     uint2 launchIndex = DispatchRaysIndex().xy;
     float2 dims = DispatchRaysDimensions().xy;
-    float2 d = (((launchIndex + 0.5f) / dims.xy) * 2.f - 1.f);
+
+    float2 pixelCenter = launchIndex + 0.5;
+    float2 uv = pixelCenter / dims.xy;
+
+    float2 d = uv * 2.0 - 1.0;
+    float aspectRatio = float(dims.x) / float(dims.y);
 
     RayDesc ray;
-    ray.Origin = float3(0.0, 0.0, 0.0);
-    ray.Direction = float3(0.0, 0.0, -1.0);
-    ray.TMin = 0;
+    ray.Origin = float3(0.0, 0.0, -2.0);
+    ray.Direction = normalize(float3(d.x * aspectRatio, -d.y, 1.0));
+    ray.TMin = 0.001;
     ray.TMax = 1000.0;
 
     Payload payload;
