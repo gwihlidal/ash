@@ -762,10 +762,10 @@ impl RayTracingApp {
                     .expect("Could not find triangle.rgen.spv.");
             let mut chit_spv_file =
                 File::open(Path::new("shader/nv_ray_tracing/triangle.rchit.spv"))
-                    .expect("Could not find triangle.chit.spv.");
+                    .expect("Could not find triangle.rchit.spv.");
             let mut miss_spv_file =
                 File::open(Path::new("shader/nv_ray_tracing/triangle.rmiss.spv"))
-                    .expect("Could not find triangle.miss.spv.");
+                    .expect("Could not find triangle.rmiss.spv.");
 
             let rgen_code = read_spv(&mut rgen_spv_file).expect("Failed to read raygen spv file");
             let rgen_shader_info = vk::ShaderModuleCreateInfo::builder().code(&rgen_code);
