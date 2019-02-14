@@ -2,7 +2,7 @@
 #extension GL_NV_ray_tracing : require
 
 layout(location = 0) rayPayloadInNV vec3 hitValue;
-layout(location = 1) hitAttributeNV vec3 attribs;
+hitAttributeNV vec3 attribs;
 
 void main()
 {
