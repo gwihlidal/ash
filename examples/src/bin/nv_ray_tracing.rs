@@ -805,16 +805,25 @@ impl RayTracingApp {
                 vk::RayTracingShaderGroupCreateInfoNV::builder()
                     .ty(vk::RayTracingShaderGroupTypeNV::GENERAL)
                     .general_shader(0)
+                    .closest_hit_shader(vk::SHADER_UNUSED_NV)
+                    .any_hit_shader(vk::SHADER_UNUSED_NV)
+                    .intersection_shader(vk::SHADER_UNUSED_NV)
                     .build(),
                 // group1 = [ chit ]
                 vk::RayTracingShaderGroupCreateInfoNV::builder()
                     .ty(vk::RayTracingShaderGroupTypeNV::TRIANGLES_HIT_GROUP)
+                    .general_shader(vk::SHADER_UNUSED_NV)
                     .closest_hit_shader(1)
+                    .any_hit_shader(vk::SHADER_UNUSED_NV)
+                    .intersection_shader(vk::SHADER_UNUSED_NV)
                     .build(),
                 // group2 = [ miss ]
                 vk::RayTracingShaderGroupCreateInfoNV::builder()
                     .ty(vk::RayTracingShaderGroupTypeNV::GENERAL)
                     .general_shader(2)
+                    .closest_hit_shader(vk::SHADER_UNUSED_NV)
+                    .any_hit_shader(vk::SHADER_UNUSED_NV)
+                    .intersection_shader(vk::SHADER_UNUSED_NV)
                     .build(),
             ];
 
@@ -1072,9 +1081,26 @@ impl RayTracingApp {
     fn record_ray_tracing(&self, command_buffer: vk::CommandBuffer) {
         if let Some(ref shader_binding_table) = self.shader_binding_table {
             let handle_size = self.properties.shader_group_handle_size as u64;
+
             // |[ raygen shader ]|[ hit shader  ]|[ miss shader ]|
             // |                 |               |               |
             // | 0               | 1             | 2             | 3
+
+            let sbt_raygen_buffer = shader_binding_table.buffer;
+            let sbt_raygen_offset = 0;
+
+            let sbt_miss_buffer = shader_binding_table.buffer;
+            let sbt_miss_offset = 2 * handle_size;
+            let sbt_miss_stride = handle_size;
+
+            let sbt_hit_buffer = shader_binding_table.buffer;
+            let sbt_hit_offset = 1 * handle_size;
+            let sbt_hit_stride = handle_size;
+
+            let sbt_call_buffer = vk::Buffer::null();
+            let sbt_call_offset = 0;
+            let sbt_call_stride = 0;
+
             unsafe {
                 self.base.device.cmd_bind_pipeline(
                     command_buffer,
@@ -1091,17 +1117,17 @@ impl RayTracingApp {
                 );
                 self.ray_tracing.cmd_trace_rays(
                     command_buffer,
-                    shader_binding_table.buffer,
-                    0,
-                    shader_binding_table.buffer,
-                    2 * handle_size,
-                    handle_size,
-                    shader_binding_table.buffer,
-                    1 * handle_size,
-                    handle_size,
-                    vk::Buffer::null(),
-                    0,
-                    0,
+                    sbt_raygen_buffer,
+                    sbt_raygen_offset,
+                    sbt_miss_buffer,
+                    sbt_miss_offset,
+                    sbt_miss_stride,
+                    sbt_hit_buffer,
+                    sbt_hit_offset,
+                    sbt_hit_stride,
+                    sbt_call_buffer,
+                    sbt_call_offset,
+                    sbt_call_stride,
                     1920,
                     1080,
                     1,
