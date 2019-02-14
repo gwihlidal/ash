@@ -1,14 +1,7 @@
 echo off
 
-set OUT_DIR=./
-IF NOT EXIST "%OUT_DIR%" (
-mkdir "%OUT_DIR%"
-)
-
-for /r %%i in (*.rchit) do glslangValidator -V "%%i" -o "%OUT_DIR%%%~ni%%~xi.spv"
-for /r %%i in (*.rahit) do glslangValidator -V "%%i" -o "%OUT_DIR%%%~ni%%~xi.spv"
-for /r %%i in (*.rgen) do glslangValidator -V "%%i" -o "%OUT_DIR%%%~ni%%~xi.spv"
-for /r %%i in (*.rmiss) do glslangValidator -V "%%i" -o "%OUT_DIR%%%~ni%%~xi.spv"
-for /r %%i in (*.glsl) do glslangValidator -V "%%i" -o "%OUT_DIR%%%~ni%%~xi.spv"
+glslangValidator -V -o triangle.glsl_rchit.spv triangle.rchit.glsl
+glslangValidator -V -o triangle.glsl_rgen.spv triangle.rgen.glsl
+glslangValidator -V -o triangle.glsl_rmiss.spv triangle.rmiss.glsl
 
 pause
