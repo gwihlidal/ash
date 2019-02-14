@@ -1,0 +1,1 @@
+docker run --entrypoint "/app/dxc/bin/dxc" --rm -v $(pwd):$(pwd) -w $(pwd) gwihlidal/docker-shader:vk_rt -T lib_6_3 -spirv triangle.lib.hlsl -Fo triangle.lib.spv
