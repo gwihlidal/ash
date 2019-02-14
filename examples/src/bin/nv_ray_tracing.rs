@@ -406,7 +406,10 @@ impl RayTracingApp {
                 },
             ];
 
-            let vertex_buffer_size = std::mem::size_of::<Vertex>() * vertices.len();
+            let vertex_count = vertices.len();
+            let vertex_stride = std::mem::size_of::<Vertex>();
+
+            let vertex_buffer_size = vertex_stride * vertex_count;
             let mut vertex_buffer = BufferResource::new(
                 vertex_buffer_size as u64,
                 vk::BufferUsageFlags::VERTEX_BUFFER,
@@ -416,7 +419,8 @@ impl RayTracingApp {
             vertex_buffer.store(&vertices);
 
             let indices = [0u16, 1, 2];
-            let index_buffer_size = std::mem::size_of::<u16>() * indices.len();
+            let index_count = indices.len();
+            let index_buffer_size = std::mem::size_of::<u16>() * index_count;
             let mut index_buffer = BufferResource::new(
                 index_buffer_size as u64,
                 vk::BufferUsageFlags::INDEX_BUFFER,
@@ -433,12 +437,12 @@ impl RayTracingApp {
                             vk::GeometryTrianglesNV::builder()
                                 .vertex_data(vertex_buffer.buffer)
                                 .vertex_offset(0)
-                                .vertex_count(vertices.len() as u32)
-                                .vertex_stride(std::mem::size_of::<Vertex>() as u64)
+                                .vertex_count(vertex_count as u32)
+                                .vertex_stride(vertex_stride as u64)
                                 .vertex_format(vk::Format::R32G32B32_SFLOAT)
                                 .index_data(index_buffer.buffer)
                                 .index_offset(0)
-                                .index_count(indices.len() as u32)
+                                .index_count(index_count as u32)
                                 .index_type(vk::IndexType::UINT16)
                                 .build(),
                         )
